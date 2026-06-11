@@ -638,8 +638,7 @@
   }
 
   function historyErrorText(text) {
-    const match = text.match(/(prompt declined|unable to generate|generation failed|try again|content policy|quota|limit|error)[^\n]{0,120}/i);
-    return match ? match[0] : "";
+    return GenerationResult.pageErrorText(text);
   }
 
   function isPageBusy() {

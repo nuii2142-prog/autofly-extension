@@ -25,6 +25,12 @@ Use this after code changes that affect popup, background runner, content script
 - Verify the runner returns Firefly to `/generate/image` before the next prompt.
 - Verify the queue reaches `Complete` or records a clear failure reason.
 
+## Error Detection Accuracy
+
+- Run one prompt while Adobe's promo banner ("Get unlimited image generations...") is visible on the page.
+- Verify the run is NOT failed by marketing copy: the prompt should complete or time out, never fail within seconds with promo text as the error.
+- If a real decline occurs (prompt declined / reached your generation limit), verify it is still reported as a failure with the page's actual error text.
+
 ## Auto-Download Safety
 
 - Enable Auto-download and run one prompt.

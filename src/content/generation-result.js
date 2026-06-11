@@ -1,4 +1,39 @@
 (function attachContentGenerationResult(root) {
+  // Page-wide text scanning needs word-bounded, error-shaped phrases: bare
+  // keywords like "limit" match marketing copy ("unlimited image generations")
+  // and fail healthy runs. False negatives here are safe — the wait loop
+  // still times out — so precision wins over recall.
+  const PAGE_ERROR_PATTERN = new RegExp(
+    "\\b(?:"
+    + [
+      "prompt declined",
+      "unable to generate",
+      "couldn['’]?t (?:generate|process)",
+      "could not (?:generate|process)",
+      "generation failed",
+      "failed to generate",
+      "something went wrong",
+      "content polic(?:y|ies)",
+      "policy violation",
+      "quota\\b(?:\\s+(?:reached|exceeded))?",
+      "limits?\\s+(?:reached|exceeded|hit)",
+      "(?:reached|exceeded)\\s+(?:your\\s+|the\\s+)?[^\\n]{0,40}?limits?\\b",
+      "rate limits?\\b",
+      "out of (?:generative\\s+)?credits",
+      "insufficient credits",
+      "try again later"
+    ].join("|")
+    + ")[^\\n]{0,120}",
+    "i"
+  );
+
+  const ALERT_ERROR_PATTERN = /\b(?:error|errors|failed|fails|failure|try again|blocked|declined|policy|policies|quota|quotas|limit|limits)\b/i;
+
+  function pageErrorText(text) {
+    const match = String(text || "").match(PAGE_ERROR_PATTERN);
+    return match ? match[0] : "";
+  }
+
   function isGenerateBusyState(state) {
     if (!state) return false;
     return Boolean(
@@ -56,14 +91,15 @@
       if (!normalized) return false;
       if (/can['’]?t save .*generation history/i.test(normalized)) return false;
       if (/couldn['’]?t save .*generation history/i.test(normalized)) return false;
-      return /error|failed|try again|blocked|policy|limit|quota/i.test(normalized);
+      return ALERT_ERROR_PATTERN.test(normalized);
     }) || "";
   }
 
   const api = {
     blockingErrorFromTexts,
     isGenerateBusyState,
-    isGenerateResultSettled
+    isGenerateResultSettled,
+    pageErrorText
   };
 
   root.NuiiContentGeneration = api;

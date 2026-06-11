@@ -4,7 +4,8 @@ const assert = require("node:assert/strict");
 const {
   blockingErrorFromTexts,
   isGenerateBusyState,
-  isGenerateResultSettled
+  isGenerateResultSettled,
+  pageErrorText
 } = require("../src/content/generation-result.js");
 
 test("isGenerateResultSettled completes when Generate page becomes idle after a busy run", () => {
@@ -91,5 +92,60 @@ test("blockingErrorFromTexts ignores Firefly history-save notices", () => {
   assert.equal(
     blockingErrorFromTexts(["Generation failed. Please try again."]),
     "Generation failed. Please try again."
+  );
+});
+
+test("blockingErrorFromTexts ignores marketing copy containing unlimited", () => {
+  assert.equal(
+    blockingErrorFromTexts([
+      "Get unlimited image generations in Firefly for a full year with select credit subscriptions."
+    ]),
+    ""
+  );
+});
+
+test("blockingErrorFromTexts still detects real limit and quota alerts", () => {
+  assert.equal(
+    blockingErrorFromTexts(["You've reached your generation limit."]),
+    "You've reached your generation limit."
+  );
+  assert.equal(
+    blockingErrorFromTexts(["Quota exceeded for this account."]),
+    "Quota exceeded for this account."
+  );
+});
+
+test("pageErrorText ignores the unlimited-generations promo banner", () => {
+  assert.equal(
+    pageErrorText("Get unlimited image generations in Firefly for a full year with select credit subscriptions."),
+    ""
+  );
+});
+
+test("pageErrorText ignores generic page copy without error phrasing", () => {
+  assert.equal(pageErrorText("Generate images from text prompts. Limited time offer on premium plans."), "");
+  assert.equal(pageErrorText(""), "");
+});
+
+test("pageErrorText detects genuine generation errors with trailing context", () => {
+  assert.equal(
+    pageErrorText("Prompt declined. Try rewording your prompt."),
+    "Prompt declined. Try rewording your prompt."
+  );
+  assert.equal(
+    pageErrorText("Unable to generate. Please try again later."),
+    "Unable to generate. Please try again later."
+  );
+  assert.equal(
+    pageErrorText("Header text\nYou've reached your generation limit for today.\nFooter"),
+    "reached your generation limit for today."
+  );
+  assert.equal(
+    pageErrorText("Quota exceeded for this account."),
+    "Quota exceeded for this account."
+  );
+  assert.equal(
+    pageErrorText("You are out of generative credits."),
+    "out of generative credits."
   );
 });
