@@ -25,6 +25,17 @@ Use this after code changes that affect popup, background runner, content script
 - Verify the runner returns Firefly to `/generate/image` before the next prompt.
 - Verify the queue reaches `Complete` or records a clear failure reason.
 
+## Duplicate-Generation Guard
+
+- Run one prompt and let the result wait time out (set a short timeout, e.g. 60s, on a slow generation).
+- Verify the prompt is NOT retried after "Generation started" was logged: the item should complete as done with a "not retried" notice instead of clicking Generate a second time.
+- Verify exactly one generation batch exists in Firefly for that prompt.
+
+## Completion Detection
+
+- Run one prompt on a busy Generate page (existing batches and style cards visible).
+- Verify the run advances within a few seconds of the Generate button re-enabling (look for stage "generate-button-idle" or another complete stage), instead of waiting for the full timeout.
+
 ## Error Detection Accuracy
 
 - Run one prompt while Adobe's promo banner ("Get unlimited image generations...") is visible on the page.

@@ -13,6 +13,24 @@
       return { action: "done" };
     }
 
+    // A result-verification timeout after a confirmed submission means
+    // generation already started on the page; retrying would click Generate
+    // again and create a duplicate batch with double credit spend.
+    if (response.code === "RESULT_TIMEOUT" && item.submittedAt) {
+      const warning = "Result not verified before timeout; generation already started, so it was not retried. Check Firefly for the output.";
+      item.status = "done";
+      item.finishedAt = Date.now();
+      item.meta = {
+        downloads: 0,
+        warning,
+        stage: "unverified-timeout",
+        route: response.route || "",
+        outputCount: null,
+        unverified: true
+      };
+      return { action: "done", warning };
+    }
+
     item.error = response.error || "Unknown automation error";
     appState.lastError = item.error;
 

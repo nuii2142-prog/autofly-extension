@@ -53,6 +53,24 @@
     const outputChanged = Boolean(before.outputSignature) && state.outputSignature !== before.outputSignature;
     const settled = !busy && !state.loadingCount && !state.skeletonCount && stableTicks >= 2;
 
+    // The Generate button returning to enabled after a busy phase is the most
+    // reliable completion signal: page-wide image signatures keep churning on
+    // busy pages (lazy-loaded galleries, style rails) and can block the
+    // stable-signature rules forever.
+    const idleButtonTicks = Number(options.idleButtonTicks) || 0;
+    if (
+      (outputIncreased || outputChanged)
+      && sawBusy
+      && idleButtonTicks >= 2
+      && elapsedMs > 5000
+    ) {
+      return {
+        complete: true,
+        stage: "generate-button-idle",
+        warning: ""
+      };
+    }
+
     if ((outputIncreased || outputChanged) && settled) {
       return {
         complete: true,

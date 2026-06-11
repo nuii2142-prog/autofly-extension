@@ -83,6 +83,61 @@ test("isGenerateBusyState only treats generate-specific signals as busy", () => 
   }), true);
 });
 
+test("isGenerateResultSettled completes via idle Generate button despite signature churn", () => {
+  const result = isGenerateResultSettled(
+    {
+      outputCount: 8,
+      outputSignature: "still-churning-2",
+      loadingCount: 1,
+      skeletonCount: 0,
+      generateButtonFound: true,
+      generateButtonDisabled: false
+    },
+    {
+      outputCount: 4,
+      outputSignature: "baseline"
+    },
+    0,
+    20000,
+    {
+      busy: true,
+      sawBusy: true,
+      sawChange: true,
+      idleButtonTicks: 2
+    }
+  );
+
+  assert.equal(result.complete, true);
+  assert.equal(result.stage, "generate-button-idle");
+});
+
+test("isGenerateResultSettled does not complete by button signal while button is disabled", () => {
+  const result = isGenerateResultSettled(
+    {
+      outputCount: 8,
+      outputSignature: "still-churning-2",
+      loadingCount: 1,
+      skeletonCount: 2,
+      generateButtonFound: true,
+      generateButtonDisabled: true
+    },
+    {
+      outputCount: 4,
+      outputSignature: "baseline"
+    },
+    0,
+    20000,
+    {
+      busy: true,
+      sawBusy: true,
+      sawChange: true,
+      idleButtonTicks: 0
+    }
+  );
+
+  assert.equal(result.complete, false);
+});
+
 test("blockingErrorFromTexts ignores Firefly history-save notices", () => {
   assert.equal(
     blockingErrorFromTexts(["Can't save some items to generation history Download"]),

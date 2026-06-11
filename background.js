@@ -223,6 +223,7 @@ async function processQueue() {
         if (response.route) addLog(`Completed on ${response.route}`);
         if (response.stage) addLog(`Complete stage: ${response.stage}${response.finalState ? ` (${response.finalState.outputCount} outputs)` : ""}`);
         if (response.warning) addLog(`Notice: ${response.warning}`);
+        if (transition.warning) addLog(`Notice: ${transition.warning}`);
       } else if (transition.action === "retry") {
         addLog(`Retry ${item.attempts}/${appState.settings.retryLimit}: ${item.error}`);
       } else {
@@ -638,7 +639,7 @@ async function waitForSubmittedPrompt(tabId, prompt, submittedAt, baselineState)
     return responseWithRoute;
   }
 
-  return { success: false, error: "Timed out waiting for Firefly result" };
+  return { success: false, code: "RESULT_TIMEOUT", error: "Timed out waiting for Firefly result" };
 }
 
 async function navigateToFireflyGenerate(tabId) {

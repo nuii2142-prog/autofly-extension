@@ -158,6 +158,7 @@
       success: result.success,
       warning: result.warning || "",
       stage: result.stage || "",
+      code: result.code || "",
       finalState: result.finalState || null,
       downloads,
       elapsedMs: Date.now() - startedAt,
@@ -228,7 +229,7 @@
       }
     }
 
-    return { success: false, error: "Timed out waiting for History page result" };
+    return { success: false, code: "RESULT_TIMEOUT", error: "Timed out waiting for History page result" };
   }
 
   function findPromptInput() {
@@ -394,6 +395,7 @@
     let sawBusy = false;
     let sawChange = false;
     let stableTicks = 0;
+    let idleButtonTicks = 0;
     let lastStableKey = "";
 
     while (Date.now() - startedAt < timeout) {
@@ -428,6 +430,11 @@
         lastStableKey = stableKey;
       }
 
+      const buttonIdle = state.generateButtonFound
+        && !state.generateButtonDisabled
+        && !state.skeletonCount;
+      idleButtonTicks = buttonIdle ? idleButtonTicks + 1 : 0;
+
       if (state.errorText) {
         return { success: false, error: state.errorText };
       }
@@ -437,7 +444,7 @@
         beforeState,
         stableTicks,
         Date.now() - startedAt,
-        { busy, sawBusy, sawChange }
+        { busy, sawBusy, sawChange, idleButtonTicks }
       );
 
       if (settled.complete) {
@@ -451,10 +458,10 @@
     }
 
     if (sawChange) {
-      return { success: false, error: "Timed out before Generate page output settled" };
+      return { success: false, code: "RESULT_TIMEOUT", error: "Timed out before Generate page output settled" };
     }
 
-    return { success: false, error: "Timed out waiting for Generate page output" };
+    return { success: false, code: "RESULT_TIMEOUT", error: "Timed out waiting for Generate page output" };
   }
 
   function generatePageState(prompt) {
@@ -820,24 +827,27 @@
     return element && (element.tagName === "TEXTAREA" || element.tagName === "INPUT");
   }
 
-  function deepQuerySelectorAll(selector) {
-    const results = [];
-    const visited = new Set();
+  // Discovering shadow roots and iframes requires walking every element, which
+  // is the expensive part of deep queries. One page-state computation issues
+  // many deep queries back to back, so the discovered roots are cached briefly
+  // and shared between them instead of re-walking the DOM per query.
+  let deepRootsCache = { time: 0, roots: null };
+
+  function collectDocumentRoots() {
+    const now = Date.now();
+    if (deepRootsCache.roots && now - deepRootsCache.time < 400) {
+      return deepRootsCache.roots;
+    }
+
     const roots = [document];
+    const visited = new Set();
 
     for (let index = 0; index < roots.length; index += 1) {
       const root = roots[index];
       if (!root || visited.has(root)) continue;
       visited.add(root);
 
-      try {
-        results.push(...Array.from(root.querySelectorAll(selector)));
-      } catch (error) {
-        // Ignore unsupported selectors in older embedded contexts.
-      }
-
-      const allElements = safeQueryAll(root, "*");
-      allElements.forEach((element) => {
+      safeQueryAll(root, "*").forEach((element) => {
         if (element.shadowRoot && !visited.has(element.shadowRoot)) {
           roots.push(element.shadowRoot);
         }
@@ -852,6 +862,21 @@
           }
         }
       });
+    }
+
+    deepRootsCache = { time: now, roots };
+    return roots;
+  }
+
+  function deepQuerySelectorAll(selector) {
+    const results = [];
+
+    for (const root of collectDocumentRoots()) {
+      try {
+        results.push(...Array.from(root.querySelectorAll(selector)));
+      } catch (error) {
+        // Ignore unsupported selectors in older embedded contexts.
+      }
     }
 
     return uniqueElements(results);
