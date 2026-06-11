@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "Nuii AutoFly Studio",
+  "version": "1.1.0",
+  "description": "Bulk prompt automation for AI image generation workflows in the browser.",
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Nuii AutoFly Studio"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://firefly.adobe.com/*"],
+      "js": [
+        "src/shared/text.js",
+        "src/shared/message.js",
+        "src/content/firefly-selectors.js",
+        "src/content/generation-result.js",
+        "src/content/history-result.js",
+        "src/content/prompt-control.js",
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting",
+    "downloads",
+    "debugger"
+  ],
+  "host_permissions": [
+    "*://firefly.adobe.com/*"
+  ]
+}

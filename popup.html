@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nuii AutoFly Studio</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">NA</div>
+        <div class="brand-copy">
+          <h1>Nuii AutoFly Studio</h1>
+          <p id="active-target">No target tab</p>
+        </div>
+      </div>
+      <span class="status-pill idle" id="status-pill">Idle</span>
+    </header>
+
+    <section class="target-bar" aria-label="Target browser tab">
+      <div class="target-copy">
+        <span class="target-label">Target</span>
+        <strong id="target-host">Checking tab...</strong>
+      </div>
+      <button class="icon-button" id="refresh-target" title="Refresh target tab" aria-label="Refresh target tab">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M21 12a9 9 0 0 1-15.2 6.5"></path>
+          <path d="M3 12A9 9 0 0 1 18.2 5.5"></path>
+          <path d="M18 2v4h-4"></path>
+          <path d="M6 22v-4h4"></path>
+        </svg>
+      </button>
+    </section>
+
+    <section class="stats-grid" aria-label="Queue summary">
+      <div class="stat-tile">
+        <span>Queued</span>
+        <strong id="stat-total">0</strong>
+      </div>
+      <div class="stat-tile">
+        <span>Done</span>
+        <strong id="stat-done">0</strong>
+      </div>
+      <div class="stat-tile">
+        <span>Failed</span>
+        <strong id="stat-failed">0</strong>
+      </div>
+      <div class="stat-tile">
+        <span>Left</span>
+        <strong id="stat-left">0</strong>
+      </div>
+    </section>
+
+    <section class="panel prompt-panel">
+      <div class="panel-heading">
+        <div>
+          <h2>Prompts</h2>
+          <span id="prompt-count">0 ready</span>
+        </div>
+        <button class="text-button" id="clear-prompts">Clear</button>
+      </div>
+
+      <div class="segmented" role="tablist" aria-label="Prompt input mode">
+        <button class="segment active" id="source-paste" type="button">Paste</button>
+        <button class="segment" id="source-file" type="button">File</button>
+      </div>
+
+      <div class="source-view" id="paste-view">
+        <textarea id="prompts-textarea" spellcheck="false" placeholder="cinematic product photo of a ceramic mug on a walnut desk"></textarea>
+      </div>
+
+      <div class="source-view hidden" id="file-view">
+        <label class="drop-zone" id="drop-zone" for="file-input">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <path d="M17 8 12 3 7 8"></path>
+            <path d="M12 3v12"></path>
+          </svg>
+          <span id="file-title">Drop .txt or .csv</span>
+          <small id="file-subtitle">Prompt column or one prompt per line</small>
+        </label>
+        <input type="file" id="file-input" accept=".txt,.csv,text/plain,text/csv" hidden>
+      </div>
+
+      <div class="prompt-tools">
+        <label>
+          <span>Prefix</span>
+          <input type="text" id="prompt-prefix" placeholder="ultra detailed">
+        </label>
+        <label>
+          <span>Suffix</span>
+          <input type="text" id="prompt-suffix" placeholder="--ar 16:9">
+        </label>
+      </div>
+
+      <label class="check-row">
+        <input type="checkbox" id="dedupe-prompts" checked>
+        <span>Remove duplicate prompts</span>
+      </label>
+    </section>
+
+    <section class="panel settings-panel">
+      <div class="panel-heading compact">
+        <h2>Run Settings</h2>
+      </div>
+
+      <div class="setting-line">
+        <label for="delay-slider">Delay</label>
+        <div class="range-wrap">
+          <input type="range" min="1" max="60" value="5" id="delay-slider">
+          <output id="delay-output">5s</output>
+        </div>
+      </div>
+
+      <div class="setting-line">
+        <label for="timeout-slider">Timeout</label>
+        <div class="range-wrap">
+          <input type="range" min="60" max="600" step="10" value="240" id="timeout-slider">
+          <output id="timeout-output">240s</output>
+        </div>
+      </div>
+
+      <div class="settings-grid">
+        <label>
+          <span>Retries</span>
+          <select id="retry-limit">
+            <option value="0">0</option>
+            <option value="1" selected>1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+          </select>
+        </label>
+        <label>
+          <span>Platform</span>
+          <select id="platform-mode">
+            <option value="firefly" selected>Adobe Firefly</option>
+            <option value="current-tab">Current tab</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="switch-list">
+        <label class="switch-row">
+          <span>Auto-download</span>
+          <input type="checkbox" id="auto-download">
+        </label>
+        <label class="switch-row">
+          <span>Remove completed from editor</span>
+          <input type="checkbox" id="auto-delete" checked>
+        </label>
+        <label class="switch-row">
+          <span>Continue after errors</span>
+          <input type="checkbox" id="continue-on-error" checked>
+        </label>
+      </div>
+    </section>
+
+    <section class="run-panel" aria-label="Run controls">
+      <div class="progress-head">
+        <span id="current-prompt">Ready</span>
+        <strong id="progress-label">0%</strong>
+      </div>
+      <div class="progress-track">
+        <div class="progress-fill" id="progress-fill"></div>
+      </div>
+
+      <div class="actions">
+        <button class="primary-button" id="start-btn" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"></path></svg>
+          <span>Start</span>
+        </button>
+        <button class="secondary-button" id="pause-btn" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5h3v14H8z"></path><path d="M13 5h3v14h-3z"></path></svg>
+          <span>Pause</span>
+        </button>
+        <button class="danger-button" id="stop-btn" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h10v10H7z"></path></svg>
+          <span>Stop</span>
+        </button>
+      </div>
+    </section>
+
+    <section class="panel queue-panel">
+      <div class="panel-heading compact">
+        <h2>Activity</h2>
+        <button class="text-button" id="export-log">Export</button>
+      </div>
+      <ol class="activity-list" id="activity-list"></ol>
+    </section>
+  </main>
+
+  <script src="src/shared/text.js"></script>
+  <script src="src/shared/settings.js"></script>
+  <script src="src/popup/prompt-tools.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
