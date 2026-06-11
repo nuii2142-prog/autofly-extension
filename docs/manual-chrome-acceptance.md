@@ -35,6 +35,8 @@ Use this after code changes that affect popup, background runner, content script
 
 - Run one prompt on a busy Generate page (existing batches and style cards visible).
 - Verify the run advances within a few seconds of the Generate button re-enabling (look for stage "generate-button-idle" or another complete stage), instead of waiting for the full timeout.
+- Run several prompts back to back and verify the rhythm is: generate finishes -> delay -> next prompt submits, with no full-timeout stalls between prompts.
+- If a prompt still completes via the timeout fallback, verify the activity log contains a "Wait diagnostics:" line (numbers only, no prompt text) and report it.
 
 ## Error Detection Accuracy
 

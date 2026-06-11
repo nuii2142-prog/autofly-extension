@@ -160,6 +160,7 @@
       stage: result.stage || "",
       code: result.code || "",
       finalState: result.finalState || null,
+      diag: result.diag || null,
       downloads,
       elapsedMs: Date.now() - startedAt,
       error: result.error || ""
@@ -351,6 +352,21 @@
     return scored.length ? scored[0].element : null;
   }
 
+  // Unlike the click-target candidates, state observation must include the
+  // disabled button: while Firefly generates, the Generate button is disabled,
+  // and that is the primary busy signal. Filtering disabled buttons out made
+  // generateButtonDisabled permanently false and blinded busy detection.
+  function findGenerateButtonForState() {
+    const scored = FireflySelectors.GENERATE_BUTTON_SELECTORS
+      .flatMap((selector) => deepQuerySelectorAll(selector))
+      .filter(isVisible)
+      .map((element) => ({ element, score: generateButtonScore(element) }))
+      .filter((item) => item.score > 0)
+      .sort((a, b) => b.score - a.score);
+
+    return scored.length ? scored[0].element : null;
+  }
+
   function generateButtonCandidates() {
     const candidates = FireflySelectors.GENERATE_BUTTON_SELECTORS
       .flatMap((selector) => deepQuerySelectorAll(selector))
@@ -397,6 +413,20 @@
     let stableTicks = 0;
     let idleButtonTicks = 0;
     let lastStableKey = "";
+    let lastObservedState = null;
+
+    const buildDiag = () => ({
+      baselineOutputs: beforeState ? beforeState.outputCount || 0 : 0,
+      lastOutputs: lastObservedState ? lastObservedState.outputCount : -1,
+      lastLoading: lastObservedState ? lastObservedState.loadingCount : -1,
+      lastSkeleton: lastObservedState ? lastObservedState.skeletonCount : -1,
+      buttonFound: Boolean(lastObservedState && lastObservedState.generateButtonFound),
+      buttonDisabled: Boolean(lastObservedState && lastObservedState.generateButtonDisabled),
+      idleButtonTicks,
+      stableTicks,
+      sawBusy,
+      sawChange
+    });
 
     while (Date.now() - startedAt < timeout) {
       await sleep(1000);
@@ -430,10 +460,12 @@
         lastStableKey = stableKey;
       }
 
-      const buttonIdle = state.generateButtonFound
-        && !state.generateButtonDisabled
-        && !state.skeletonCount;
+      // The page-wide skeleton heuristic can match permanent UI chrome, so it
+      // must not gate the button-idle signal; the disabled state of the
+      // Generate button itself is the authoritative in-progress indicator.
+      const buttonIdle = state.generateButtonFound && !state.generateButtonDisabled;
       idleButtonTicks = buttonIdle ? idleButtonTicks + 1 : 0;
+      lastObservedState = state;
 
       if (state.errorText) {
         return { success: false, error: state.errorText };
@@ -458,10 +490,10 @@
     }
 
     if (sawChange) {
-      return { success: false, code: "RESULT_TIMEOUT", error: "Timed out before Generate page output settled" };
+      return { success: false, code: "RESULT_TIMEOUT", error: "Timed out before Generate page output settled", diag: buildDiag() };
     }
 
-    return { success: false, code: "RESULT_TIMEOUT", error: "Timed out waiting for Generate page output" };
+    return { success: false, code: "RESULT_TIMEOUT", error: "Timed out waiting for Generate page output", diag: buildDiag() };
   }
 
   function generatePageState(prompt) {
@@ -474,7 +506,7 @@
     const outputSignature = outputs
       .map((element) => outputElementSignature(element))
       .join("|");
-    const button = findGenerateButton();
+    const button = findGenerateButtonForState();
     const promptValue = getPromptValue();
 
     return {
