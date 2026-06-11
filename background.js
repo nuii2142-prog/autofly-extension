@@ -66,8 +66,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 
     if (request.action === "START_PROCESSING") {
-      startProcessing(request);
-      sendResponse({ success: true, state: publicState() });
+      const started = startProcessing(request);
+      sendResponse({ ...started, state: publicState() });
       return;
     }
 
@@ -99,6 +99,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 });
 
 function startProcessing(request) {
+  if (appState.status === "Running") {
+    return { success: false, error: "A run is already in progress. Stop or pause it before starting a new one." };
+  }
+
   const prompts = Array.isArray(request.prompts) ? request.prompts : [];
   const requestItems = Array.isArray(request.items) && request.items.length
     ? request.items
@@ -132,6 +136,7 @@ function startProcessing(request) {
   addLog(`Loaded ${requestItems.length} prompts`);
   saveAndBroadcast();
   processQueue();
+  return { success: true };
 }
 
 function pauseProcessing() {
@@ -713,6 +718,7 @@ async function ensureContentReady(tabId) {
         "src/content/generation-result.js",
         "src/content/history-result.js",
         "src/content/prompt-control.js",
+        "src/content/download-buttons.js",
         "content.js"
       ]
     });
@@ -847,6 +853,7 @@ async function loadState() {
       } else {
         addLog("Service worker restarted; queue paused");
       }
+      await chrome.storage.local.set({ [STORAGE_KEY]: appState });
     }
   }
 }

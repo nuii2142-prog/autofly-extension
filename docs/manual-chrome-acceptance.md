@@ -25,6 +25,17 @@ Use this after code changes that affect popup, background runner, content script
 - Verify the runner returns Firefly to `/generate/image` before the next prompt.
 - Verify the queue reaches `Complete` or records a clear failure reason.
 
+## Auto-Download Safety
+
+- Enable Auto-download and run one prompt.
+- Verify result download controls are clicked, but footer/navigation links containing "download" (for example "Download the app") are never clicked.
+- Verify the Firefly tab is not navigated away by the auto-download pass.
+
+## Double-Start Guard
+
+- Start a multi-prompt run, then immediately send Start again (for example from a reopened popup).
+- Verify the second start is rejected with "A run is already in progress" in the activity area and the running queue is not reset.
+
 ## Queue Controls
 
 - Start a multi-prompt run.

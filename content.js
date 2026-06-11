@@ -685,14 +685,25 @@
 
   async function clickDownloadButtons() {
     await sleep(1200);
-    const buttons = deepQuerySelectorAll("button, [role='button'], a, sp-button")
-      .filter(isVisible)
-      .filter((element) => !isDisabled(element))
-      .filter((element) => /download/i.test(elementLabel(element)))
-      .slice(0, 6);
+    const DownloadButtons = globalThis.NuiiContentDownloads;
+    const buttons = DownloadButtons.filterDownloadCandidates(
+      deepQuerySelectorAll("button, [role='button'], a, sp-button")
+        .filter(isVisible)
+        .filter((element) => !isDisabled(element))
+        .map((element) => ({
+          element,
+          descriptor: {
+            label: elementLabel(element),
+            tagName: element.tagName,
+            hasDownloadAttr: Boolean(element.hasAttribute && element.hasAttribute("download")),
+            inNavigation: Boolean(element.closest && element.closest("nav, header, footer, [role='navigation'], [aria-label*='navigation' i]"))
+          }
+        })),
+      6
+    );
 
-    for (const button of buttons) {
-      clickElement(button);
+    for (const item of buttons) {
+      clickElement(item.element);
       await sleep(450);
     }
 

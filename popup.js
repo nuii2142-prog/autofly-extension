@@ -282,7 +282,7 @@ async function handleStartOrResume() {
 
   const settings = readSettings();
   await saveDraft();
-  await sendMessage({
+  const response = await sendMessage({
     action: "START_PROCESSING",
     items: promptEntries,
     prompts: promptEntries.map((entry) => entry.prompt),
@@ -291,6 +291,10 @@ async function handleStartOrResume() {
     targetUrl: activeTab.url || "",
     targetTitle: activeTab.title || ""
   });
+
+  if (response && response.success === false && response.error) {
+    renderNotice(response.error);
+  }
 }
 
 function collectPrompts() {

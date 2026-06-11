@@ -12,7 +12,7 @@
   },
   "content_scripts": [
     {
-      "matches": ["*://firefly.adobe.com/*"],
+      "matches": ["https://firefly.adobe.com/*"],
       "js": [
         "src/shared/text.js",
         "src/shared/message.js",
@@ -20,6 +20,7 @@
         "src/content/generation-result.js",
         "src/content/history-result.js",
         "src/content/prompt-control.js",
+        "src/content/download-buttons.js",
         "content.js"
       ],
       "run_at": "document_idle"
@@ -29,10 +30,9 @@
     "storage",
     "activeTab",
     "scripting",
-    "downloads",
     "debugger"
   ],
   "host_permissions": [
-    "*://firefly.adobe.com/*"
+    "https://firefly.adobe.com/*"
   ]
 }
