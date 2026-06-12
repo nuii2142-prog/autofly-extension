@@ -4,8 +4,7 @@ importScripts(
   "src/shared/message.js",
   "src/background/route-policy.js",
   "src/background/queue-state.js",
-  "src/background/start-strategy.js",
-  "src/background/download-plan.js"
+  "src/background/start-strategy.js"
 );
 
 const STORAGE_KEY = "nuiiAutoflyState";
@@ -15,7 +14,6 @@ const DEFAULT_SETTINGS = globalThis.NuiiShared.DEFAULT_SETTINGS;
 const RoutePolicy = globalThis.NuiiBackgroundRoutePolicy;
 const QueueState = globalThis.NuiiBackgroundQueueState;
 const StartStrategy = globalThis.NuiiBackgroundStartStrategy;
-const DownloadPlan = globalThis.NuiiBackgroundDownloadPlan;
 const normalizeTabMessageResponse = globalThis.NuiiShared.normalizeTabMessageResponse;
 
 const DEFAULT_STATE = {
@@ -228,8 +226,8 @@ async function processQueue() {
         if (response.warning) addLog(`Notice: ${response.warning}`);
         if (transition.warning) addLog(`Notice: ${transition.warning}`);
         if (response.diag) addWaitDiagnostics(response.diag);
-        if (appState.settings.autoDownload) {
-          await autoDownloadResultImages(item, response);
+        if (appState.settings.autoDownload && response.downloads) {
+          addLog(`Downloaded ${response.downloads} image${response.downloads > 1 ? "s" : ""}`);
         }
       } else if (transition.action === "retry") {
         addLog(`Retry ${item.attempts}/${appState.settings.retryLimit}: ${item.error}`);
@@ -651,44 +649,6 @@ async function waitForSubmittedPrompt(tabId, prompt, submittedAt, baselineState)
   return { success: false, code: "RESULT_TIMEOUT", error: "Timed out waiting for Firefly result" };
 }
 
-async function autoDownloadResultImages(item, response) {
-  // A single generation yields only a few images; cap defensively so an
-  // unexpected detection can never enqueue a large number of downloads.
-  const urls = (Array.isArray(response.imageUrls) ? response.imageUrls : []).slice(0, 8);
-  const plan = DownloadPlan.buildDownloadPlan({
-    urls,
-    index: positionOf(item),
-    prompt: item.sourcePrompt || item.prompt,
-    subfolder: appState.settings.downloadSubfolder
-  });
-
-  if (!plan.length) {
-    if (response.fallbackDownloads) {
-      addLog(`Downloaded ${response.fallbackDownloads} via Firefly button (direct URL unavailable)`);
-    } else {
-      addLog("Auto-download found no result image URL");
-    }
-    return;
-  }
-
-  let saved = 0;
-  for (const entry of plan) {
-    try {
-      await downloadFile(entry.url, entry.filename);
-      saved += 1;
-    } catch (error) {
-      addLog(`Download failed: ${truncate(error.message, 60)}`);
-    }
-  }
-
-  if (saved > 0) {
-    const folder = plan[0].filename.split("/")[0];
-    addLog(`Downloaded ${saved} image${saved > 1 ? "s" : ""} to ${folder}/`);
-    const active = appState.queue.find((entry) => entry.id === item.id);
-    if (active && active.meta) active.meta.downloads = saved;
-  }
-}
-
 async function playCompletionSound(tone) {
   if (!appState.settings.soundOnComplete) return;
   if (!chrome.offscreen) return;
@@ -710,18 +670,6 @@ async function playCompletionSound(tone) {
   } catch (error) {
     // Offscreen audio unavailable; a missing chime must never break a run.
   }
-}
-
-function downloadFile(url, filename) {
-  return new Promise((resolve, reject) => {
-    chrome.downloads.download({ url, filename, saveAs: false, conflictAction: "uniquify" }, (downloadId) => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-        return;
-      }
-      resolve(downloadId);
-    });
-  });
 }
 
 async function navigateToFireflyGenerate(tabId) {

@@ -48,12 +48,15 @@ Use this after code changes that affect popup, background runner, content script
 
 ## Auto-Download
 
-- Enable Auto-download; a "Save to folder" field appears. Leave it as "Firefly-AutoFly" or set a custom name.
-- Run two prompts and verify images are saved silently (no Save As dialog) into `Downloads\<that folder>\`.
-- Verify filenames follow `NNN-prompt-words.jpg` (e.g. `001-young-couple-kitchen.jpg`), with `-1/-2` suffixes when a prompt yields several images.
-- Verify only the generated result images are saved — not unrelated page/gallery thumbnails — and the count per prompt is small.
-- Verify the activity log shows `Downloaded N images to <folder>/` with NO Save As / confirmation dialog. (Blob result images are converted to data URLs so the silent path still applies; "via Firefly button" should now be rare.)
-- After updating the extension, accept the new "Manage your downloads" permission prompt on reload.
+- Enable Auto-download and run two prompts.
+- Verify the full-resolution result images are downloaded through Firefly's own download control into the browser's Downloads folder.
+- Verify the activity log shows `Downloaded N image(s)` for each completed prompt.
+- Note: downloads use Firefly's native control, so the file goes to the standard Downloads location. If Chrome's "Ask where to save each file before downloading" setting is on, the browser will prompt — turn that setting off for fully unattended runs.
+
+## Auto-Download Safety
+
+- Result download controls are clicked, but footer/navigation links containing "download" (for example "Download the app") are never clicked.
+- Verify the Firefly tab is not navigated away by the auto-download pass.
 
 ## Completion Sound
 
@@ -61,11 +64,6 @@ Use this after code changes that affect popup, background runner, content script
 - Verify a short chime plays when the queue reaches Complete, even with the popup closed.
 - Turn the toggle off, run again, and verify no sound plays.
 - Verify a run that ends in Error (Continue-after-errors off, a forced failure) plays the distinct error tone.
-
-## Auto-Download Safety (fallback button path)
-
-- When the direct URL path is unavailable, result download controls are clicked, but footer/navigation links containing "download" (for example "Download the app") are never clicked.
-- Verify the Firefly tab is not navigated away by the auto-download pass.
 
 ## Double-Start Guard
 

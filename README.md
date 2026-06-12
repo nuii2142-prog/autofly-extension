@@ -8,7 +8,8 @@ Original Chrome extension for bulk prompt automation on browser-based AI image t
 - Paste, TXT, and CSV prompt import with duplicate removal.
 - Prefix and suffix prompt transforms, including `{n}` numbering.
 - Delay, timeout, retry, auto-download, auto-delete, and continue-on-error controls.
-- Silent auto-download of generated images into a chosen subfolder of Downloads, named `NNN-prompt-words.jpg`, with a Firefly download-button fallback.
+- Auto-download of full-resolution results through Firefly's own download control, to the standard Downloads folder.
+- Optional completion chime when the queue finishes, played from an offscreen document.
 - Completion is detected from result images actually finishing rendering, so the next prompt only starts once the current images are done.
 - More resilient page automation for prompt inputs, generate buttons, busy states, output changes, and download buttons.
 - Split submit/wait runner: the extension sends a prompt to the Firefly Generate prompt box, clicks Generate once, then waits for completed outputs on the Generate page before starting the next delay.

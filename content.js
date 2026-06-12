@@ -144,18 +144,11 @@
       beforeState
     });
 
-    // Prefer downloading the captured result images directly from the
-    // background (silent, into the chosen subfolder). http(s) URLs pass through
-    // (Chrome's downloader fetches them, cross-origin is fine); blob: URLs are
-    // converted to data URLs here since the background cannot resolve a page
-    // blob. Only click Firefly's own download button when nothing is usable.
-    let imageUrls = [];
+    // Download the full-resolution result through Firefly's own download
+    // control (the page <img> is only a low-res grid thumbnail).
+    let downloads = 0;
     if (result.success && autoDownload) {
-      imageUrls = await toDownloadableUrls(result.imageUrls || []);
-    }
-    let fallbackDownloads = 0;
-    if (result.success && autoDownload && imageUrls.length === 0) {
-      fallbackDownloads = await clickDownloadButtons();
+      downloads = await clickDownloadButtons();
     }
 
     if (result.success) {
@@ -170,9 +163,7 @@
       code: result.code || "",
       finalState: result.finalState || null,
       diag: result.diag || null,
-      imageUrls,
-      fallbackDownloads,
-      downloads: fallbackDownloads,
+      downloads,
       elapsedMs: Date.now() - startedAt,
       error: result.error || ""
     };
@@ -224,9 +215,6 @@
       );
 
       if (settled.complete) {
-        // The History route renders thumbnails without stable direct URLs, so
-        // it downloads through Firefly's own button (background skips its direct
-        // download when no http(s) URL is provided).
         let downloads = 0;
         if (settings.autoDownload) {
           downloads = await clickDownloadButtons();
@@ -237,8 +225,6 @@
           warning: settled.warning,
           stage: settled.stage,
           finalState: state,
-          imageUrls: [],
-          fallbackDownloads: downloads,
           downloads,
           elapsedMs: Date.now() - startedAt,
           error: ""
@@ -543,8 +529,7 @@
           stage: settled.stage,
           warning: settled.warning,
           finalState: state,
-          diag: buildDiag(),
-          imageUrls: currentLoadedOutputImageKeys().filter((key) => !baselineImageKeys.has(key))
+          diag: buildDiag()
         };
       }
     }
@@ -635,38 +620,6 @@
       busyCount,
       hasPercent
     };
-  }
-
-  // Turn result image sources into URLs the background can download silently.
-  // http(s) pass straight through; blob: URLs are read in the page context and
-  // re-encoded as data URLs (limited to a sane count to bound message size).
-  async function toDownloadableUrls(keys) {
-    const out = [];
-    for (const key of (keys || []).slice(0, 8)) {
-      const value = String(key || "");
-      if (/^https?:\/\//i.test(value) || /^data:image\//i.test(value)) {
-        out.push(value);
-      } else if (/^blob:/i.test(value)) {
-        const dataUrl = await blobUrlToDataUrl(value);
-        if (dataUrl) out.push(dataUrl);
-      }
-    }
-    return out;
-  }
-
-  async function blobUrlToDataUrl(blobUrl) {
-    try {
-      const response = await fetch(blobUrl);
-      const blob = await response.blob();
-      return await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = () => reject(reader.error);
-        reader.readAsDataURL(blob);
-      });
-    } catch (error) {
-      return null;
-    }
   }
 
   // src keys of result <img> elements that are currently fully loaded. Used to

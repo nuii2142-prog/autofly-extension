@@ -15,7 +15,6 @@
     dedupe: true,
     prefix: "",
     suffix: "",
-    downloadSubfolder: "Firefly-AutoFly",
     soundOnComplete: true
   };
 
@@ -34,7 +33,6 @@
       dedupe: input.dedupe !== false,
       prefix: String(input.prefix || "").trim(),
       suffix: String(input.suffix || "").trim(),
-      downloadSubfolder: String(input.downloadSubfolder || DEFAULT_SETTINGS.downloadSubfolder).slice(0, 120),
       soundOnComplete: input.soundOnComplete !== false
     };
   }
