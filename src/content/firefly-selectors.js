@@ -42,11 +42,19 @@
     "firefly-thumbnail"
   ];
 
+  // Per-generation batch cards, newest first. Used to track completion of the
+  // batch created by the current submission, ignoring the rest of the page.
+  const BATCH_CONTAINER_SELECTORS = [
+    '[data-testid="batch-grid-0"]',
+    "firefly-collapsible-batch-grid"
+  ];
+
   const api = {
     PROMPT_INPUT_SELECTORS,
     GENERATE_BUTTON_SELECTORS,
     GRID_VIEW_SELECTORS,
-    OUTPUT_CONTAINER_SELECTORS
+    OUTPUT_CONTAINER_SELECTORS,
+    BATCH_CONTAINER_SELECTORS
   };
 
   root.NuiiContentSelectors = api;

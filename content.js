@@ -412,21 +412,31 @@
     let sawChange = false;
     let stableTicks = 0;
     let idleButtonTicks = 0;
+    let batchStableTicks = 0;
     let lastStableKey = "";
+    let lastBatchSignature = "";
     let lastObservedState = null;
 
-    const buildDiag = () => ({
-      baselineOutputs: beforeState ? beforeState.outputCount || 0 : 0,
-      lastOutputs: lastObservedState ? lastObservedState.outputCount : -1,
-      lastLoading: lastObservedState ? lastObservedState.loadingCount : -1,
-      lastSkeleton: lastObservedState ? lastObservedState.skeletonCount : -1,
-      buttonFound: Boolean(lastObservedState && lastObservedState.generateButtonFound),
-      buttonDisabled: Boolean(lastObservedState && lastObservedState.generateButtonDisabled),
-      idleButtonTicks,
-      stableTicks,
-      sawBusy,
-      sawChange
-    });
+    const buildDiag = () => {
+      const lastBatch = lastObservedState ? lastObservedState.batch : null;
+      return {
+        baselineOutputs: beforeState ? beforeState.outputCount || 0 : 0,
+        lastOutputs: lastObservedState ? lastObservedState.outputCount : -1,
+        lastLoading: lastObservedState ? lastObservedState.loadingCount : -1,
+        lastSkeleton: lastObservedState ? lastObservedState.skeletonCount : -1,
+        buttonFound: Boolean(lastObservedState && lastObservedState.generateButtonFound),
+        buttonDisabled: Boolean(lastObservedState && lastObservedState.generateButtonDisabled),
+        batchFound: Boolean(lastBatch && lastBatch.found),
+        batchImages: lastBatch ? `${lastBatch.loadedCount}/${lastBatch.imageCount}` : "none",
+        batchBusy: lastBatch ? lastBatch.busyCount : -1,
+        batchPercent: Boolean(lastBatch && lastBatch.hasPercent),
+        batchStableTicks,
+        idleButtonTicks,
+        stableTicks,
+        sawBusy,
+        sawChange
+      };
+    };
 
     while (Date.now() - startedAt < timeout) {
       await sleep(1000);
@@ -465,6 +475,14 @@
       // Generate button itself is the authoritative in-progress indicator.
       const buttonIdle = state.generateButtonFound && !state.generateButtonDisabled;
       idleButtonTicks = buttonIdle ? idleButtonTicks + 1 : 0;
+
+      if (state.batch && state.batch.found && state.batch.signature === lastBatchSignature) {
+        batchStableTicks += 1;
+      } else {
+        batchStableTicks = 0;
+        lastBatchSignature = state.batch ? state.batch.signature : "";
+      }
+
       lastObservedState = state;
 
       if (state.errorText) {
@@ -476,7 +494,7 @@
         beforeState,
         stableTicks,
         Date.now() - startedAt,
-        { busy, sawBusy, sawChange, idleButtonTicks }
+        { busy, sawBusy, sawChange, idleButtonTicks, batchStableTicks }
       );
 
       if (settled.complete) {
@@ -508,12 +526,14 @@
       .join("|");
     const button = findGenerateButtonForState();
     const promptValue = getPromptValue();
+    const batch = newestBatchState();
 
     return {
       loadingCount,
       skeletonCount,
       outputCount: outputs.length,
       outputSignature,
+      batch,
       promptSeen: resultPromptSeen(prompt, visibleText),
       promptValue,
       generateButtonFound: Boolean(button),
@@ -521,6 +541,52 @@
       generateButtonLabel: button ? truncate(elementLabel(button), 80) : "",
       errorText: historyErrorText(visibleText),
       key: `${loadingCount}:${skeletonCount}:${outputs.length}:${outputSignature}:${promptValue}:${button ? isDisabled(button) : "none"}:${simpleHash(visibleText.slice(0, 5000))}`
+    };
+  }
+
+  // State of the newest generation batch card. Firefly inserts the batch for
+  // a new submission at the top, so the first matching container is the one
+  // this run just created. Completion is judged only inside that container.
+  function newestBatchState() {
+    const container = FireflySelectors.BATCH_CONTAINER_SELECTORS
+      .flatMap((selector) => deepQuerySelectorAll(selector))
+      .filter(isVisible)
+      .find(Boolean) || null;
+
+    if (!container) {
+      return { found: false, signature: "", imageCount: 0, loadedCount: 0, busyCount: 0, hasPercent: false };
+    }
+
+    const images = deepQueryWithin(container, "img")
+      .filter(isVisible)
+      .filter((image) => {
+        const rect = image.getBoundingClientRect();
+        return rect.width >= 80 && rect.height >= 60;
+      });
+    const loadedCount = images.filter((image) => image.complete && image.naturalWidth > 20).length;
+    const busyCount = deepQueryWithin(
+      container,
+      "[aria-busy='true'], [role='progressbar'], progress, [class*='skeleton' i], [class*='shimmer' i], [class*='spinner' i], [class*='loading' i]"
+    ).filter(isVisible).length;
+    // Only count percent text inside progress-shaped nodes. The card also
+    // renders the prompt caption, which may contain figures like "50% opacity"
+    // that must not be mistaken for generation progress.
+    const hasPercent = deepQueryWithin(
+      container,
+      "[role='progressbar'], [aria-valuenow], progress, [class*='progress' i], [class*='percent' i], [class*='loading' i]"
+    )
+      .filter(isVisible)
+      .some((node) => /(^|\s)\d{1,3}\s?%/.test(node.textContent || ""));
+    const signature = images.map((image) => image.currentSrc || image.src || "").join("|")
+      || `${container.tagName}:${Math.round(container.getBoundingClientRect().height)}`;
+
+    return {
+      found: true,
+      signature,
+      imageCount: images.length,
+      loadedCount,
+      busyCount,
+      hasPercent
     };
   }
 

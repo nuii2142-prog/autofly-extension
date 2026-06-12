@@ -40,6 +40,7 @@
       state.loadingCount > 0
       || state.skeletonCount > 0
       || (state.generateButtonFound && state.generateButtonDisabled)
+      || (state.batch && state.batch.found && (state.batch.busyCount > 0 || state.batch.hasPercent))
     );
   }
 
@@ -53,22 +54,58 @@
     const outputChanged = Boolean(before.outputSignature) && state.outputSignature !== before.outputSignature;
     const settled = !busy && !state.loadingCount && !state.skeletonCount && stableTicks >= 2;
 
-    // The Generate button returning to enabled after a busy phase is the most
-    // reliable completion signal: page-wide image signatures keep churning on
-    // busy pages (lazy-loaded galleries, style rails) and can block the
-    // stable-signature rules forever.
-    const idleButtonTicks = Number(options.idleButtonTicks) || 0;
-    if (
-      (outputIncreased || outputChanged)
-      && sawBusy
-      && idleButtonTicks >= 2
-      && elapsedMs > 5000
-    ) {
-      return {
-        complete: true,
-        stage: "generate-button-idle",
-        warning: ""
-      };
+    // Newest-batch tracking is the authoritative completion signal: Firefly
+    // re-enables the Generate button as soon as a job is queued (not when it
+    // finishes), and page-wide output counts churn on large galleries. Only
+    // the batch card created by this submission says whether the images are
+    // actually done: it must be a new card, every image in it must be fully
+    // loaded, and no progress indicator may remain inside it.
+    const batch = state.batch || null;
+    const beforeBatch = before.batch || null;
+    // The batch rule is only usable when we can actually measure images inside
+    // the newest card. If a card is matched but exposes no qualifying <img>
+    // (canvas / background-image renders, sub-threshold thumbnails, or a
+    // mismatched container), the batch signal can never satisfy, so we must
+    // fall through to the button-idle rule instead of deadlocking on it.
+    const batchUsable = Boolean(batch && batch.found && batch.imageCount > 0);
+
+    if (batchUsable) {
+      const batchChanged = !beforeBatch || !beforeBatch.found || batch.signature !== beforeBatch.signature;
+      const batchLoaded = batch.loadedCount >= batch.imageCount
+        && !batch.busyCount
+        && !batch.hasPercent;
+      const batchStableTicks = Number(options.batchStableTicks) || 0;
+
+      // sawBusy is required so a wait that opens on an already-finished previous
+      // card (e.g. a baseline carrying no batch info after a mid-wait reload)
+      // cannot complete until it has observed this submission's busy->idle
+      // transition. Real generations always pass through a busy phase first.
+      if (batchChanged && batchLoaded && sawBusy && batchStableTicks >= 2 && elapsedMs > 5000) {
+        return {
+          complete: true,
+          stage: "generate-batch-loaded",
+          warning: ""
+        };
+      }
+    }
+
+    if (!batchUsable) {
+      // Fallback for pages without a usable batch container: the Generate
+      // button staying enabled after a busy phase, plus output growth. Weaker
+      // than batch tracking, so it needs more idle ticks.
+      const idleButtonTicks = Number(options.idleButtonTicks) || 0;
+      if (
+        (outputIncreased || outputChanged)
+        && sawBusy
+        && idleButtonTicks >= 3
+        && elapsedMs > 5000
+      ) {
+        return {
+          complete: true,
+          stage: "generate-button-idle",
+          warning: ""
+        };
+      }
     }
 
     if ((outputIncreased || outputChanged) && settled) {

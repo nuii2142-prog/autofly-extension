@@ -226,7 +226,7 @@ async function processQueue() {
         if (transition.warning) addLog(`Notice: ${transition.warning}`);
         if (transition.warning && response.diag) {
           const diag = response.diag;
-          addLog(`Wait diagnostics: outputs ${diag.baselineOutputs}->${diag.lastOutputs}, loading ${diag.lastLoading}, skeleton ${diag.lastSkeleton}, button ${diag.buttonFound ? (diag.buttonDisabled ? "disabled" : "idle") : "missing"}, idleTicks ${diag.idleButtonTicks}, stable ${diag.stableTicks}, sawBusy ${diag.sawBusy}`);
+          addLog(`Wait diagnostics: outputs ${diag.baselineOutputs}->${diag.lastOutputs}, batch ${diag.batchFound ? `${diag.batchImages} loaded, busy ${diag.batchBusy}, percent ${diag.batchPercent}, stable ${diag.batchStableTicks}` : "missing"}, button ${diag.buttonFound ? (diag.buttonDisabled ? "disabled" : "idle") : "missing"}, idleTicks ${diag.idleButtonTicks}, sawBusy ${diag.sawBusy}`);
         }
       } else if (transition.action === "retry") {
         addLog(`Retry ${item.attempts}/${appState.settings.retryLimit}: ${item.error}`);

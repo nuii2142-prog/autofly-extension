@@ -83,7 +83,166 @@ test("isGenerateBusyState only treats generate-specific signals as busy", () => 
   }), true);
 });
 
-test("isGenerateResultSettled completes via idle Generate button despite signature churn", () => {
+test("isGenerateResultSettled completes when the newest batch is fully loaded and stable", () => {
+  const result = isGenerateResultSettled(
+    {
+      outputCount: 185,
+      outputSignature: "page-churn",
+      loadingCount: 2,
+      skeletonCount: 1,
+      generateButtonFound: true,
+      generateButtonDisabled: false,
+      batch: {
+        found: true,
+        signature: "new-batch-4-images",
+        imageCount: 4,
+        loadedCount: 4,
+        busyCount: 0,
+        hasPercent: false
+      }
+    },
+    {
+      outputCount: 184,
+      outputSignature: "baseline",
+      batch: { found: true, signature: "previous-batch" }
+    },
+    0,
+    14000,
+    {
+      busy: true,
+      sawBusy: true,
+      sawChange: true,
+      idleButtonTicks: 9,
+      batchStableTicks: 2
+    }
+  );
+
+  assert.equal(result.complete, true);
+  assert.equal(result.stage, "generate-batch-loaded");
+});
+
+test("isGenerateResultSettled does not complete while the newest batch is still rendering", () => {
+  const stillRendering = {
+    outputCount: 185,
+    outputSignature: "page-churn",
+    loadingCount: 0,
+    skeletonCount: 0,
+    generateButtonFound: true,
+    generateButtonDisabled: false,
+    batch: {
+      found: true,
+      signature: "new-batch-partial",
+      imageCount: 4,
+      loadedCount: 2,
+      busyCount: 1,
+      hasPercent: true
+    }
+  };
+
+  const result = isGenerateResultSettled(
+    stillRendering,
+    { outputCount: 180, outputSignature: "baseline", batch: { found: true, signature: "previous-batch" } },
+    0,
+    20000,
+    {
+      busy: false,
+      sawBusy: true,
+      sawChange: true,
+      idleButtonTicks: 9,
+      batchStableTicks: 5
+    }
+  );
+
+  assert.equal(result.complete, false);
+});
+
+test("isGenerateResultSettled suppresses the button-idle rule when a batch container exists", () => {
+  const result = isGenerateResultSettled(
+    {
+      outputCount: 8,
+      outputSignature: "churn",
+      loadingCount: 0,
+      skeletonCount: 0,
+      generateButtonFound: true,
+      generateButtonDisabled: false,
+      batch: {
+        found: true,
+        signature: "new-batch-unsettled",
+        imageCount: 4,
+        loadedCount: 4,
+        busyCount: 0,
+        hasPercent: false
+      }
+    },
+    { outputCount: 4, outputSignature: "baseline", batch: { found: true, signature: "previous-batch" } },
+    0,
+    20000,
+    {
+      busy: false,
+      sawBusy: true,
+      sawChange: true,
+      idleButtonTicks: 9,
+      batchStableTicks: 1
+    }
+  );
+
+  assert.equal(result.complete, false);
+});
+
+test("isGenerateResultSettled falls back to button-idle when a batch card exposes no images", () => {
+  const result = isGenerateResultSettled(
+    {
+      outputCount: 8,
+      outputSignature: "churn",
+      loadingCount: 0,
+      skeletonCount: 0,
+      generateButtonFound: true,
+      generateButtonDisabled: false,
+      batch: { found: true, signature: "card", imageCount: 0, loadedCount: 0, busyCount: 0, hasPercent: false }
+    },
+    { outputCount: 4, outputSignature: "baseline", batch: { found: false } },
+    0,
+    20000,
+    {
+      busy: true,
+      sawBusy: true,
+      sawChange: true,
+      idleButtonTicks: 3,
+      batchStableTicks: 5
+    }
+  );
+
+  assert.equal(result.complete, true);
+  assert.equal(result.stage, "generate-button-idle");
+});
+
+test("isGenerateResultSettled does not complete a loaded batch until a busy phase was observed", () => {
+  const result = isGenerateResultSettled(
+    {
+      outputCount: 185,
+      outputSignature: "page-churn",
+      loadingCount: 0,
+      skeletonCount: 0,
+      generateButtonFound: true,
+      generateButtonDisabled: false,
+      batch: { found: true, signature: "already-loaded", imageCount: 4, loadedCount: 4, busyCount: 0, hasPercent: false }
+    },
+    { outputCount: 184, outputSignature: "baseline", batch: { found: false } },
+    0,
+    14000,
+    {
+      busy: false,
+      sawBusy: false,
+      sawChange: true,
+      idleButtonTicks: 9,
+      batchStableTicks: 5
+    }
+  );
+
+  assert.equal(result.complete, false);
+});
+
+test("isGenerateResultSettled completes via idle Generate button only when no batch container exists", () => {
   const result = isGenerateResultSettled(
     {
       outputCount: 8,
@@ -91,7 +250,8 @@ test("isGenerateResultSettled completes via idle Generate button despite signatu
       loadingCount: 1,
       skeletonCount: 0,
       generateButtonFound: true,
-      generateButtonDisabled: false
+      generateButtonDisabled: false,
+      batch: { found: false }
     },
     {
       outputCount: 4,
@@ -103,7 +263,7 @@ test("isGenerateResultSettled completes via idle Generate button despite signatu
       busy: true,
       sawBusy: true,
       sawChange: true,
-      idleButtonTicks: 2
+      idleButtonTicks: 3
     }
   );
 
