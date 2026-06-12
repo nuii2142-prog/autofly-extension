@@ -266,6 +266,10 @@ async function requestState() {
 }
 
 async function handleStartOrResume() {
+  // Request the optional debugger permission first, while the click gesture is
+  // still active. Denial is fine: the run falls back to DOM clicks only.
+  const debuggerGranted = await ensureDebuggerPermission();
+
   if (lastState && lastState.status === "Paused") {
     await sendMessage({ action: "RESUME_PROCESSING" });
     return;
@@ -275,6 +279,10 @@ async function handleStartOrResume() {
   if (!promptEntries.length) {
     renderNotice("Add prompts before starting.");
     return;
+  }
+
+  if (!debuggerGranted) {
+    renderNotice("Debugger fallback disabled; using standard clicks only.");
   }
 
   await refreshTarget();
@@ -312,14 +320,6 @@ function collectPromptEntries() {
 
 function parsePrompts(text) {
   return PromptTools.parsePrompts(text);
-}
-
-function parseCsvLike(text) {
-  return PromptTools.parseCsvLike(text);
-}
-
-function cleanPrompt(value) {
-  return PromptTools.cleanPrompt(value);
 }
 
 function readSettings() {
@@ -484,6 +484,23 @@ function sendMessage(message) {
   });
 }
 
+function ensureDebuggerPermission() {
+  return new Promise((resolve) => {
+    try {
+      // Resolves true without any prompt when the permission is already granted.
+      chrome.permissions.request({ permissions: ["debugger"] }, (granted) => {
+        if (chrome.runtime.lastError) {
+          resolve(false);
+          return;
+        }
+        resolve(Boolean(granted));
+      });
+    } catch (error) {
+      resolve(false);
+    }
+  });
+}
+
 function tabsQuery(query) {
   return new Promise((resolve, reject) => {
     chrome.tabs.query(query, (tabs) => {
@@ -514,12 +531,25 @@ function sendTabMessage(tabId, message) {
 
 function storageGet(key) {
   return new Promise((resolve) => {
-    chrome.storage.local.get(key, (items) => resolve(items[key]));
+    chrome.storage.local.get(key, (items) => {
+      if (chrome.runtime.lastError) {
+        resolve(undefined);
+        return;
+      }
+      resolve(items[key]);
+    });
   });
 }
 
 function storageSet(items) {
   return new Promise((resolve) => {
-    chrome.storage.local.set(items, resolve);
+    chrome.storage.local.set(items, () => {
+      if (chrome.runtime.lastError) {
+        // Draft persistence is best-effort (e.g. a too-large imported file);
+        // surface it in the console instead of failing silently.
+        console.warn("[Nuii AutoFly] Draft not saved:", chrome.runtime.lastError.message);
+      }
+      resolve();
+    });
   });
 }

@@ -25,9 +25,20 @@
       .slice(0, max);
   }
 
+  // How many download controls a prompt may click. An unknown or zero count
+  // means this prompt's images were not individually detected; clicking a
+  // generic fallback amount would re-download older batches still on the page,
+  // so the safe cap is zero, not a wider default.
+  function resolveDownloadLimit(newImageCount) {
+    const count = Number(newImageCount);
+    if (!Number.isFinite(count) || count <= 0) return 0;
+    return Math.min(count, 8);
+  }
+
   const api = {
     isSafeDownloadCandidate,
-    filterDownloadCandidates
+    filterDownloadCandidates,
+    resolveDownloadLimit
   };
 
   root.NuiiContentDownloads = api;

@@ -44,6 +44,29 @@
     return { action: "failed" };
   }
 
+  // A new run may only start once the previous queue loop has fully exited.
+  // A paused run can still be inside an awaited prompt (navigation waits run
+  // up to 45s); replacing the state under it makes the old loop adopt the new
+  // queue and cross-contaminate logs and item transitions.
+  function canStartNewRun(options) {
+    const opts = options || {};
+    if (opts.status === "Running") {
+      return {
+        allowed: false,
+        reason: "A run is already in progress. Stop or pause it before starting a new one."
+      };
+    }
+
+    if (opts.queueLoopRunning) {
+      return {
+        allowed: false,
+        reason: "The previous run is still finishing its current prompt. Wait a moment or stop it first."
+      };
+    }
+
+    return { allowed: true, reason: "" };
+  }
+
   function computeStats(queue) {
     return (queue || []).reduce(
       (stats, item) => {
@@ -95,6 +118,7 @@
 
   const api = {
     applyPromptResultToItem,
+    canStartNewRun,
     computeStats,
     recoverRunningItemsAfterRestart,
     formatRunSummary

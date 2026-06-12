@@ -1,7 +1,21 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { applyPromptResultToItem, formatRunSummary } = require("../src/background/queue-state.js");
+const { applyPromptResultToItem, canStartNewRun, formatRunSummary } = require("../src/background/queue-state.js");
+
+test("canStartNewRun rejects while a run is active or a previous loop is still unwinding", () => {
+  assert.deepEqual(
+    canStartNewRun({ status: "Running", queueLoopRunning: true }),
+    { allowed: false, reason: "A run is already in progress. Stop or pause it before starting a new one." }
+  );
+  assert.deepEqual(
+    canStartNewRun({ status: "Paused", queueLoopRunning: true }),
+    { allowed: false, reason: "The previous run is still finishing its current prompt. Wait a moment or stop it first." }
+  );
+  assert.deepEqual(canStartNewRun({ status: "Paused", queueLoopRunning: false }), { allowed: true, reason: "" });
+  assert.deepEqual(canStartNewRun({ status: "Idle", queueLoopRunning: false }), { allowed: true, reason: "" });
+  assert.deepEqual(canStartNewRun({ status: "Complete", queueLoopRunning: false }), { allowed: true, reason: "" });
+});
 
 test("formatRunSummary renders counts, image word, and mm:ss", () => {
   assert.equal(

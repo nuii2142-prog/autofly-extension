@@ -18,8 +18,17 @@
     }
 
     if (allowKeyboard) {
+      // One key per step, each verified before trying the next: firing
+      // Ctrl+Enter and a bare Enter back to back can submit the same prompt
+      // twice when the first key already started a generation.
       plan.push({
         kind: "keyboard",
+        key: "ctrl-enter",
+        verifyTimeoutMs: 6500
+      });
+      plan.push({
+        kind: "keyboard",
+        key: "enter",
         verifyTimeoutMs: 6500
       });
     }

@@ -10,6 +10,18 @@ Use this after code changes that affect popup, background runner, content script
 - Open a signed-in Adobe Firefly tab.
 - After reloading the extension, refresh any already-open Firefly tab so the latest content scripts are active.
 
+## Optional Debugger Permission
+
+- On the first Start, Chrome prompts for the optional `debugger` permission.
+- Accept it once and verify later Starts do not prompt again.
+- Deny it (remove via the extension's details page, then Start again and dismiss the prompt) and verify the run still works using DOM clicks only; the activity log shows "Debugger fallback unavailable; using DOM clicks only".
+
+## Target Tab Safety
+
+- Open a non-Firefly tab (for example a draft email) as the active tab and press Start with platform "Adobe Firefly".
+- Verify that tab is NOT reloaded or navigated away.
+- Verify the run adopts an existing Firefly tab, or opens a new background Firefly tab when none exists (log shows "Opened a new Firefly tab for this run").
+
 ## Generate Page Flow
 
 - Paste two short prompts into the popup.
@@ -51,6 +63,7 @@ Use this after code changes that affect popup, background runner, content script
 - Enable Auto-download and run several prompts on a page that already has older batches visible.
 - Verify the full-resolution result images are downloaded through Firefly's own download control into the browser's Downloads folder.
 - Verify the number downloaded per prompt matches that prompt's image count (e.g. 4), NOT the older batches still on the page. The activity log shows `Downloaded N image(s)` per prompt.
+- When the run completes a prompt without detecting its new images (rare fallback stages), verify NOTHING is downloaded for that prompt instead of grabbing older batches.
 - Note: downloads use Firefly's native control, so the file goes to the standard Downloads location. If Chrome's "Ask where to save each file before downloading" setting is on, the browser will prompt — turn that setting off for fully unattended runs.
 
 ## Long-Run Page Refresh
@@ -82,6 +95,8 @@ Use this after code changes that affect popup, background runner, content script
 
 - Start a multi-prompt run, then immediately send Start again (for example from a reopened popup).
 - Verify the second start is rejected with "A run is already in progress" in the activity area and the running queue is not reset.
+- Pause mid-prompt (while "Waiting on ... route" is active), then press Start right away.
+- Verify the start is rejected with "The previous run is still finishing its current prompt" until the active prompt unwinds; after that, Start works normally.
 
 ## Queue Controls
 

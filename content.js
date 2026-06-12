@@ -133,7 +133,9 @@
   }
 
   async function waitForExistingResult(prompt, settings) {
-    const timeout = clamp(Number(settings.timeout) || 240, 60, 600) * 1000;
+    // Lower bound 10s: the background sends the remaining run-timeout budget,
+    // which can legitimately be under a minute on the final pass.
+    const timeout = clamp(Number(settings.timeout) || 240, 10, 600) * 1000;
     const autoDownload = Boolean(settings.autoDownload);
     const startedAt = Date.now();
     const beforeState = settings.baselineState || generatePageState(prompt);
@@ -172,7 +174,7 @@
   }
 
   async function waitForHistoryResult(prompt, settings) {
-    const timeout = clamp(Number(settings.timeout) || 240, 60, 600) * 1000;
+    const timeout = clamp(Number(settings.timeout) || 240, 10, 600) * 1000;
     const startedAt = Date.now();
     const beforeState = settings.baselineHistoryState || generationHistoryState();
     let sawChange = false;
@@ -219,7 +221,8 @@
       if (settled.complete) {
         let downloads = 0;
         if (settings.autoDownload) {
-          downloads = await clickDownloadButtons();
+          // Scope History downloads to the outputs this prompt added.
+          downloads = await clickDownloadButtons(state.outputCount - (beforeState.outputCount || 0));
         }
 
         return {
@@ -742,14 +745,6 @@
     return `${element.tagName}:${style.backgroundImage || ""}:${Math.round(rect.width)}x${Math.round(rect.height)}`;
   }
 
-  function tryReturnToGeneratePage() {
-    try {
-      window.history.back();
-    } catch (error) {
-      // The background script also guards this route.
-    }
-  }
-
   function isFireflyHistoryPage() {
     return location.hostname === "firefly.adobe.com"
       && location.pathname.includes("/your-stuff")
@@ -822,37 +817,6 @@
     return GenerationResult.pageErrorText(text);
   }
 
-  function isPageBusy() {
-    const buttons = deepQuerySelectorAll("button, [role='button'], sp-button");
-    const busyButton = buttons.some((button) => {
-      const label = elementLabel(button);
-      return isVisible(button) && (
-        button.disabled ||
-        button.getAttribute("aria-disabled") === "true" ||
-        button.getAttribute("aria-busy") === "true" ||
-        /generating|loading|cancel|stop|processing|in progress/i.test(label)
-      );
-    });
-
-    const busyIndicators = deepQuerySelectorAll("[aria-busy='true'], [role='progressbar'], progress, .spinner, [class*='loading' i], [class*='spinner' i]");
-    return busyButton || busyIndicators.some(isVisible);
-  }
-
-  function pageFingerprint() {
-    const images = deepQuerySelectorAll("img")
-      .filter(isVisible)
-      .map((image) => `${image.currentSrc || image.src}:${image.naturalWidth}x${image.naturalHeight}`)
-      .join("|");
-    const canvases = deepQuerySelectorAll("canvas")
-      .filter(isVisible)
-      .map((canvas) => `${canvas.width}x${canvas.height}`)
-      .join("|");
-    const resultNodes = deepQuerySelectorAll("[data-testid*='image' i], [aria-label*='image' i], [class*='result' i]")
-      .filter(isVisible).length;
-
-    return `${images}|${canvases}|${resultNodes}`;
-  }
-
   function findBlockingError() {
     const alerts = deepQuerySelectorAll("[role='alert'], [aria-live='assertive'], [class*='error' i]")
       .filter(isVisible)
@@ -864,12 +828,15 @@
   }
 
   async function clickDownloadButtons(limit) {
-    await sleep(1200);
     const DownloadButtons = globalThis.NuiiContentDownloads;
     // The newest batch is inserted at the top of the results feed, so ordering
     // download controls top-first and capping to this prompt's image count
     // targets the current batch and skips older batches still on the page.
-    const max = Number(limit) > 0 ? Math.min(Number(limit), 8) : 6;
+    // An unknown count resolves to 0: better to skip than re-download old work.
+    const max = DownloadButtons.resolveDownloadLimit(limit);
+    if (!max) return 0;
+
+    await sleep(1200);
     const buttons = DownloadButtons.filterDownloadCandidates(
       deepQuerySelectorAll("button, [role='button'], a, sp-button")
         .filter(isVisible)
@@ -896,9 +863,7 @@
   }
 
   async function preferGridView() {
-    const safeGridSelectors = FireflySelectors.GRID_VIEW_SELECTORS
-      .filter((selector) => !/history/i.test(selector));
-    const button = firstVisible(safeGridSelectors.flatMap((selector) => deepQuerySelectorAll(selector)));
+    const button = firstVisible(FireflySelectors.GRID_VIEW_SELECTORS.flatMap((selector) => deepQuerySelectorAll(selector)));
     if (!button) return false;
     clickElement(button);
     await sleep(500);

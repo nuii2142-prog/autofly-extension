@@ -28,12 +28,12 @@
     "a"
   ];
 
+  // Grid-view toggles only. History-view toggles must never be listed here:
+  // preferGridView clicks the first visible match before every submit.
   const GRID_VIEW_SELECTORS = [
     '[data-testid="view-switch-to-grid"]',
     'sp-action-button[value="grid"]',
-    '[aria-label="Grid"]',
-    '[aria-label="Switch to History View"]',
-    '[data-testid="view-switch-to-history"]'
+    '[aria-label="Grid"]'
   ];
 
   const OUTPUT_CONTAINER_SELECTORS = [

@@ -3,10 +3,35 @@ const assert = require("node:assert/strict");
 
 const {
   chooseResultWaitStrategy,
+  isFireflyUrl,
+  shouldAssumeSubmittedAfterFailedSubmit,
   shouldGuardFireflyRedirect,
   shouldReturnToGenerateAfterWait,
   shouldRefreshFireflyPage
 } = require("../src/background/route-policy.js");
+
+test("isFireflyUrl accepts only pages on the firefly.adobe.com host", () => {
+  assert.equal(isFireflyUrl("https://firefly.adobe.com/generate/image"), true);
+  assert.equal(isFireflyUrl("https://firefly.adobe.com/your-stuff?generationHistory=true"), true);
+  assert.equal(isFireflyUrl("https://firefly.adobe.com/"), true);
+  assert.equal(isFireflyUrl("https://mail.google.com/"), false);
+  assert.equal(isFireflyUrl("https://firefly.adobe.com.evil.example/"), false);
+  assert.equal(isFireflyUrl(""), false);
+  assert.equal(isFireflyUrl("not a url"), false);
+});
+
+test("shouldAssumeSubmittedAfterFailedSubmit requires history-route evidence, not just a recoverable error", () => {
+  assert.equal(
+    shouldAssumeSubmittedAfterFailedSubmit("https://firefly.adobe.com/your-stuff?generationHistory=true"),
+    true
+  );
+  assert.equal(
+    shouldAssumeSubmittedAfterFailedSubmit("https://firefly.adobe.com/generate/image"),
+    false
+  );
+  assert.equal(shouldAssumeSubmittedAfterFailedSubmit(""), false);
+  assert.equal(shouldAssumeSubmittedAfterFailedSubmit(undefined), false);
+});
 
 test("shouldRefreshFireflyPage refreshes only Firefly runs at the configured interval", () => {
   assert.equal(

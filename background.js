@@ -18,6 +18,14 @@ const RoutePolicy = globalThis.NuiiBackgroundRoutePolicy;
 const QueueState = globalThis.NuiiBackgroundQueueState;
 const StartStrategy = globalThis.NuiiBackgroundStartStrategy;
 const normalizeTabMessageResponse = globalThis.NuiiShared.normalizeTabMessageResponse;
+const isControlSenderAllowed = globalThis.NuiiShared.isControlSenderAllowed;
+
+const CONTROL_ACTIONS = new Set([
+  "START_PROCESSING",
+  "PAUSE_PROCESSING",
+  "RESUME_PROCESSING",
+  "STOP_PROCESSING"
+]);
 
 const DEFAULT_STATE = {
   status: "Idle",
@@ -54,15 +62,22 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   lastHistoryRedirectAt = now;
 
   chrome.tabs.update(tabId, { url: "https://firefly.adobe.com/generate/image" })
-    .then(() => keepTabAwake(tabId))
+    .then(() => {
+      keepTabAwake(tabId);
+      addLog("Returned Firefly to Generate");
+      saveAndBroadcast();
+    })
     .catch(() => {});
-  addLog("Returned Firefly to Generate");
-  saveAndBroadcast();
 });
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   (async () => {
     await stateReady;
+
+    if (CONTROL_ACTIONS.has(request.action) && !isControlSenderAllowed(sender)) {
+      sendResponse({ success: false, error: "Run control is only accepted from the extension popup" });
+      return;
+    }
 
     if (request.action === "GET_STATE") {
       sendResponse({ success: true, state: publicState() });
@@ -103,8 +118,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 });
 
 function startProcessing(request) {
-  if (appState.status === "Running") {
-    return { success: false, error: "A run is already in progress. Stop or pause it before starting a new one." };
+  const startCheck = QueueState.canStartNewRun({
+    status: appState.status,
+    queueLoopRunning
+  });
+  if (!startCheck.allowed) {
+    return { success: false, error: startCheck.reason };
   }
 
   const prompts = Array.isArray(request.prompts) ? request.prompts : [];
@@ -116,16 +135,18 @@ function startProcessing(request) {
   appState = {
     ...clone(DEFAULT_STATE),
     status: "Running",
-    queue: requestItems.map((item, index) => ({
-      id: `${Date.now()}-${index}`,
-      prompt: String(item.prompt || "").trim(),
-      sourcePrompt: String(item.sourcePrompt || item.prompt || "").trim(),
-      status: "pending",
-      attempts: 0,
-      error: "",
-      startedAt: null,
-      finishedAt: null
-    })),
+    queue: requestItems
+      .map((item, index) => ({
+        id: `${Date.now()}-${index}`,
+        prompt: String(item.prompt || "").trim(),
+        sourcePrompt: String(item.sourcePrompt || item.prompt || "").trim(),
+        status: "pending",
+        attempts: 0,
+        error: "",
+        startedAt: null,
+        finishedAt: null
+      }))
+      .filter((item) => item.prompt),
     settings,
     targetTabId: request.targetTabId || null,
     targetUrl: request.targetUrl || "",
@@ -140,7 +161,10 @@ function startProcessing(request) {
 
   stopRequested = false;
   startWorkerKeepAlive();
-  addLog(`Loaded ${requestItems.length} prompts`);
+  addLog(`Loaded ${appState.queue.length} prompts`);
+  if (!chrome.debugger) {
+    addLog("Debugger fallback unavailable; using DOM clicks only");
+  }
   saveAndBroadcast();
   processQueue();
   return { success: true };
@@ -331,12 +355,17 @@ async function runPrompt(item) {
     }
   });
 
+  let assumedSubmitted = false;
   if (!submitResponse.success) {
+    // Generate was never clicked on this path, so only Firefly itself moving
+    // to Generation history counts as evidence that a job started. Weaker
+    // failures return here and go through the normal retry path instead of
+    // being silently marked done as an unverified timeout later.
     const tab = await safeGetTab(tabId);
-    const likelySubmitted = shouldRecoverWaitError(submitResponse.error) || (tab && isFireflyHistoryUrl(tab.url || ""));
-    if (!likelySubmitted) {
+    if (!RoutePolicy.shouldAssumeSubmittedAfterFailedSubmit(tab ? tab.url || "" : "")) {
       return submitResponse;
     }
+    assumedSubmitted = true;
   } else {
     const clickResponse = await startGenerationWithFallbacks(tabId, prompt, submitResponse);
     if (!clickResponse.success) return clickResponse;
@@ -345,7 +374,9 @@ async function runPrompt(item) {
 
   const submittedAt = Date.now();
   item.submittedAt = submittedAt;
-  addLog(`Clicked Generate: ${truncate(prompt, 52)}`);
+  addLog(assumedSubmitted
+    ? `Prompt likely submitted (Firefly moved to history): ${truncate(prompt, 52)}`
+    : `Clicked Generate: ${truncate(prompt, 52)}`);
   appState.waitingForResult = true;
   await saveAndBroadcast();
 
@@ -360,9 +391,12 @@ async function runPrompt(item) {
 async function startGenerationWithFallbacks(tabId, prompt, submitResponse) {
   const baseline = submitResponse.state || null;
   const candidates = normalizeGenerateCandidates(submitResponse);
+  // The CDP click and keyboard fallbacks need the optional debugger
+  // permission; without it the plan is DOM clicks only.
+  const debuggerAvailable = Boolean(chrome.debugger);
   const plan = StartStrategy.buildStartMethodPlan({
-    candidateCount: candidates.length,
-    allowKeyboard: true
+    candidateCount: debuggerAvailable ? candidates.length : 0,
+    allowKeyboard: debuggerAvailable
   });
 
   await sendTabMessage(tabId, { action: "FOCUS_PROMPT" });
@@ -398,15 +432,15 @@ async function startGenerationWithFallbacks(tabId, prompt, submitResponse) {
     }
 
     if (step.kind === "keyboard") {
-      const keyboardResponse = await sendGenerateKeyboardShortcut(tabId);
+      const keyboardResponse = await sendGenerateKeyboardShortcut(tabId, step.key);
       if (!keyboardResponse.success) {
-        addLog("Keyboard submit failed");
+        addLog(`Keyboard submit (${step.key}) failed`);
         continue;
       }
 
       const started = await waitForGenerationStart(tabId, prompt, baseline, step.verifyTimeoutMs);
       if (started.success) return started;
-      addLog("Keyboard submit did not start generation");
+      addLog(`Keyboard submit (${step.key}) did not start generation`);
     }
   }
 
@@ -495,6 +529,9 @@ function generationAppearsStarted(state, baseline) {
 }
 
 async function clickGenerateButton(tabId, rect) {
+  if (!chrome.debugger) {
+    return { success: false, error: "Debugger permission not granted" };
+  }
   if (!rect || !Number.isFinite(rect.centerX) || !Number.isFinite(rect.centerY)) {
     return { success: false, error: "Generate button coordinates not found" };
   }
@@ -543,12 +580,14 @@ async function clickGenerateButton(tabId, rect) {
   }
 }
 
-async function sendGenerateKeyboardShortcut(tabId) {
+async function sendGenerateKeyboardShortcut(tabId, key) {
+  if (!chrome.debugger) {
+    return { success: false, error: "Debugger permission not granted" };
+  }
+
   try {
     await chrome.debugger.attach({ tabId }, "1.3");
-    await sendKey(tabId, "Enter", "Enter", 13, { ctrl: true });
-    await delay(300);
-    await sendKey(tabId, "Enter", "Enter", 13, {});
+    await sendKey(tabId, "Enter", "Enter", 13, key === "ctrl-enter" ? { ctrl: true } : {});
     await delay(500);
     return { success: true };
   } catch (error) {
@@ -628,7 +667,10 @@ async function waitForSubmittedPrompt(tabId, prompt, submittedAt, baselineState)
     const ready = await ensureContentReady(tabId);
     if (!ready.success) return ready;
 
-    const remainingSeconds = Math.max(60, Math.ceil((timeoutMs - (Date.now() - submittedAt)) / 1000));
+    // Hand the content script only the time actually left (with a small floor
+    // so a final pass can still observe), otherwise the last wait could
+    // overshoot the user's timeout by up to a minute.
+    const remainingSeconds = Math.max(10, Math.ceil((timeoutMs - (Date.now() - submittedAt)) / 1000));
     const waitResponse = await sendTabMessage(tabId, {
       action: strategy.action,
       prompt,
@@ -765,26 +807,50 @@ async function safeGetTab(tabId) {
 }
 
 async function resolveTargetTabId() {
-  if (appState.targetTabId) {
-    try {
-      await chrome.tabs.get(appState.targetTabId);
-      return appState.targetTabId;
-    } catch (error) {
+  if (appState.settings.platform !== "firefly") {
+    if (appState.targetTabId) {
+      const tab = await safeGetTab(appState.targetTabId);
+      if (tab) return appState.targetTabId;
       appState.targetTabId = null;
     }
+    return null;
   }
 
-  if (appState.settings.platform === "firefly") {
-    const tabs = await chrome.tabs.query({ url: "*://firefly.adobe.com/*" });
-    if (tabs && tabs.length) {
-      appState.targetTabId = tabs[0].id;
-      appState.targetUrl = tabs[0].url || "";
-      appState.targetTitle = tabs[0].title || "";
-      return tabs[0].id;
+  // Firefly runs reload and navigate the target tab, so they must never adopt
+  // a tab that is not actually on firefly.adobe.com (the popup hands over
+  // whatever tab was active at Start, which may hold the user's unsaved work).
+  if (appState.targetTabId) {
+    const tab = await safeGetTab(appState.targetTabId);
+    if (tab && RoutePolicy.isFireflyUrl(tab.url || "")) {
+      return appState.targetTabId;
     }
+    appState.targetTabId = null;
   }
 
-  return null;
+  const tabs = await chrome.tabs.query({ url: "*://firefly.adobe.com/*" });
+  if (tabs && tabs.length) {
+    adoptTargetTab(tabs[0]);
+    return tabs[0].id;
+  }
+
+  try {
+    const created = await chrome.tabs.create({
+      url: "https://firefly.adobe.com/generate/image",
+      active: false
+    });
+    adoptTargetTab(created);
+    addLog("Opened a new Firefly tab for this run");
+    await saveAndBroadcast();
+    return created.id;
+  } catch (error) {
+    return null;
+  }
+}
+
+function adoptTargetTab(tab) {
+  appState.targetTabId = tab.id;
+  appState.targetUrl = tab.url || "";
+  appState.targetTitle = tab.title || "";
 }
 
 async function ensureContentReady(tabId) {
@@ -987,12 +1053,6 @@ function addLog(message) {
 
 function positionOf(item) {
   return appState.queue.findIndex((entry) => entry.id === item.id) + 1;
-}
-
-function clampNumber(value, min, max, fallback) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return fallback;
-  return Math.min(max, Math.max(min, number));
 }
 
 function truncate(value, length) {

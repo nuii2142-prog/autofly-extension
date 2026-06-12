@@ -10,9 +10,18 @@ test("buildStartMethodPlan prefers one DOM click before debugger fallbacks", () 
     "dom-click",
     "cdp-click",
     "cdp-click",
+    "keyboard",
     "keyboard"
   ]);
   assert.equal(plan[0].verifyTimeoutMs > plan[1].verifyTimeoutMs, true);
+});
+
+test("buildStartMethodPlan splits keyboard submits so each key is verified before the next", () => {
+  const plan = buildStartMethodPlan({ candidateCount: 0, allowKeyboard: true });
+  const keyboardSteps = plan.filter((step) => step.kind === "keyboard");
+
+  assert.deepEqual(keyboardSteps.map((step) => step.key), ["ctrl-enter", "enter"]);
+  keyboardSteps.forEach((step) => assert.equal(step.verifyTimeoutMs > 0, true));
 });
 
 test("buildStartMethodPlan omits keyboard unless explicitly allowed", () => {

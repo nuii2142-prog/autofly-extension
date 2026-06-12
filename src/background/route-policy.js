@@ -1,4 +1,12 @@
 (function attachBackgroundRoutePolicy(root) {
+  function isFireflyUrl(url) {
+    try {
+      return new URL(url).host === "firefly.adobe.com";
+    } catch (error) {
+      return false;
+    }
+  }
+
   function isFireflyGenerateUrl(url) {
     try {
       const parsed = new URL(url);
@@ -46,6 +54,14 @@
     return /receiving end|message port closed|extension context invalidated|frame with ID|No response/i.test(String(error || ""));
   }
 
+  // After a failed SUBMIT_PROMPT, Generate was never clicked by the runner, so
+  // "the content script went silent" alone is not submission evidence — only
+  // Firefly itself moving to Generation history proves a job actually started.
+  // Anything weaker must fail the item so the normal retry path can rerun it.
+  function shouldAssumeSubmittedAfterFailedSubmit(tabUrl) {
+    return isFireflyHistoryUrl(tabUrl || "");
+  }
+
   // A Firefly Generate feed that accumulates many batches starts virtualizing
   // images, which blinds result detection (observed at ~50 batches: zero
   // detectable result images and intermittent full-timeout stalls). Reloading
@@ -57,9 +73,11 @@
   }
 
   const api = {
+    isFireflyUrl,
     isFireflyGenerateUrl,
     isFireflyHistoryUrl,
     chooseResultWaitStrategy,
+    shouldAssumeSubmittedAfterFailedSubmit,
     shouldGuardFireflyRedirect,
     shouldReturnToGenerateAfterWait,
     shouldRecoverWaitError,

@@ -3,8 +3,24 @@ const assert = require("node:assert/strict");
 
 const {
   isSafeDownloadCandidate,
-  filterDownloadCandidates
+  filterDownloadCandidates,
+  resolveDownloadLimit
 } = require("../src/content/download-buttons.js");
+
+test("resolveDownloadLimit skips downloads when the new-image count is unknown or zero", () => {
+  assert.equal(resolveDownloadLimit(0), 0);
+  assert.equal(resolveDownloadLimit(undefined), 0);
+  assert.equal(resolveDownloadLimit(null), 0);
+  assert.equal(resolveDownloadLimit(-2), 0);
+  assert.equal(resolveDownloadLimit("garbage"), 0);
+});
+
+test("resolveDownloadLimit caps a known image count at 8", () => {
+  assert.equal(resolveDownloadLimit(1), 1);
+  assert.equal(resolveDownloadLimit(4), 4);
+  assert.equal(resolveDownloadLimit(8), 8);
+  assert.equal(resolveDownloadLimit(20), 8);
+});
 
 test("isSafeDownloadCandidate accepts a real download button", () => {
   assert.equal(

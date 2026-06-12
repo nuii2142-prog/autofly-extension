@@ -30,8 +30,10 @@
     "storage",
     "activeTab",
     "scripting",
-    "debugger",
     "offscreen"
+  ],
+  "optional_permissions": [
+    "debugger"
   ],
   "host_permissions": [
     "https://firefly.adobe.com/*"

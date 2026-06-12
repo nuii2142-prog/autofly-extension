@@ -2,7 +2,14 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const { sanitizeSettings } = require("../src/shared/settings.js");
-const { normalizeTabMessageResponse } = require("../src/shared/message.js");
+const { isControlSenderAllowed, normalizeTabMessageResponse } = require("../src/shared/message.js");
+
+test("isControlSenderAllowed accepts extension pages and rejects content-script senders", () => {
+  assert.equal(isControlSenderAllowed({ id: "ext-id" }), true);
+  assert.equal(isControlSenderAllowed({ id: "ext-id", tab: { id: 12 } }), false);
+  assert.equal(isControlSenderAllowed(undefined), false);
+  assert.equal(isControlSenderAllowed(null), false);
+});
 
 test("sanitizeSettings clamps numeric controls and preserves booleans", () => {
   const settings = sanitizeSettings({

@@ -14,7 +14,8 @@ Original Chrome extension for bulk prompt automation on browser-based AI image t
 - The Firefly tab is auto-refreshed at run start and every 10 prompts, preventing the detection stalls that appear once the results feed accumulates ~50 batches.
 - More resilient page automation for prompt inputs, generate buttons, busy states, output changes, and download buttons.
 - Split submit/wait runner: the extension sends a prompt to the Firefly Generate prompt box, clicks Generate once, then waits for completed outputs on the Generate page before starting the next delay.
-- Debugger/CDP click path: the Generate button is clicked through Chrome's debugger input API instead of plain `element.click()`, which is closer to a real browser click.
+- Debugger/CDP click path: when the optional `debugger` permission is granted (Chrome asks once on the first Start), the Generate button can be clicked through Chrome's debugger input API, which is closer to a real browser click. Denying the permission keeps runs working with standard DOM clicks only.
+- Safe tab targeting: a Firefly run never reloads or navigates a non-Firefly tab; it adopts an existing Firefly tab or opens a new one.
 - Background-friendly queue runner: the service worker keeps the Firefly tab non-discardable and does not activate the tab between prompts.
 - Active tab targeting with Adobe Firefly as the stable default.
 
