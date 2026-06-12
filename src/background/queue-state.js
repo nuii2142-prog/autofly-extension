@@ -84,10 +84,20 @@
     };
   }
 
+  function formatRunSummary(stats, downloads, elapsedMs) {
+    const summary = stats || {};
+    const totalSeconds = Math.max(0, Math.round((Number(elapsedMs) || 0) / 1000));
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = String(totalSeconds % 60).padStart(2, "0");
+    const images = Number(downloads) || 0;
+    return `${summary.done || 0} done, ${summary.failed || 0} failed, ${images} image${images === 1 ? "" : "s"}, ${minutes}:${seconds}`;
+  }
+
   const api = {
     applyPromptResultToItem,
     computeStats,
-    recoverRunningItemsAfterRestart
+    recoverRunningItemsAfterRestart,
+    formatRunSummary
   };
 
   root.NuiiBackgroundQueueState = api;

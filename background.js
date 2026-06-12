@@ -193,6 +193,7 @@ async function processQueue() {
         appState.finishedAt = Date.now();
         stopWorkerKeepAlive();
         addLog("Queue complete");
+        addRunSummary();
         await saveAndBroadcast();
         await playCompletionSound("complete");
         break;
@@ -900,6 +901,15 @@ async function saveAndBroadcast() {
   } catch (error) {
     // The popup may be closed.
   }
+}
+
+function addRunSummary() {
+  const downloads = appState.queue.reduce(
+    (sum, item) => sum + ((item.meta && Number(item.meta.downloads)) || 0),
+    0
+  );
+  const elapsedMs = appState.startedAt ? Date.now() - appState.startedAt : 0;
+  addLog(`Run summary: ${QueueState.formatRunSummary(computeStats(), downloads, elapsedMs)}`);
 }
 
 function addWaitDiagnostics(diag) {

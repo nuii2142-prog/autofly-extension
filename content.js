@@ -145,10 +145,12 @@
     });
 
     // Download the full-resolution result through Firefly's own download
-    // control (the page <img> is only a low-res grid thumbnail).
+    // control (the page <img> is only a low-res grid thumbnail). Scope to the
+    // number of images this prompt produced so older batches still on the page
+    // are not re-downloaded.
     let downloads = 0;
     if (result.success && autoDownload) {
-      downloads = await clickDownloadButtons();
+      downloads = await clickDownloadButtons(result.newImageCount);
     }
 
     if (result.success) {
@@ -529,7 +531,8 @@
           stage: settled.stage,
           warning: settled.warning,
           finalState: state,
-          diag: buildDiag()
+          diag: buildDiag(),
+          newImageCount: newLoadedCount
         };
       }
     }
@@ -860,13 +863,18 @@
     return message ? truncate(message, 160) : "";
   }
 
-  async function clickDownloadButtons() {
+  async function clickDownloadButtons(limit) {
     await sleep(1200);
     const DownloadButtons = globalThis.NuiiContentDownloads;
+    // The newest batch is inserted at the top of the results feed, so ordering
+    // download controls top-first and capping to this prompt's image count
+    // targets the current batch and skips older batches still on the page.
+    const max = Number(limit) > 0 ? Math.min(Number(limit), 8) : 6;
     const buttons = DownloadButtons.filterDownloadCandidates(
       deepQuerySelectorAll("button, [role='button'], a, sp-button")
         .filter(isVisible)
         .filter((element) => !isDisabled(element))
+        .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)
         .map((element) => ({
           element,
           descriptor: {
@@ -876,7 +884,7 @@
             inNavigation: Boolean(element.closest && element.closest("nav, header, footer, [role='navigation'], [aria-label*='navigation' i]"))
           }
         })),
-      6
+      max
     );
 
     for (const item of buttons) {

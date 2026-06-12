@@ -48,10 +48,15 @@ Use this after code changes that affect popup, background runner, content script
 
 ## Auto-Download
 
-- Enable Auto-download and run two prompts.
+- Enable Auto-download and run several prompts on a page that already has older batches visible.
 - Verify the full-resolution result images are downloaded through Firefly's own download control into the browser's Downloads folder.
-- Verify the activity log shows `Downloaded N image(s)` for each completed prompt.
+- Verify the number downloaded per prompt matches that prompt's image count (e.g. 4), NOT the older batches still on the page. The activity log shows `Downloaded N image(s)` per prompt.
 - Note: downloads use Firefly's native control, so the file goes to the standard Downloads location. If Chrome's "Ask where to save each file before downloading" setting is on, the browser will prompt — turn that setting off for fully unattended runs.
+
+## Run Summary
+
+- Run a multi-prompt queue to completion.
+- Verify the activity log ends with `Run summary: N done, M failed, K images, MM:SS` reflecting the run.
 
 ## Auto-Download Safety
 

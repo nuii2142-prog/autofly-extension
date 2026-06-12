@@ -1,7 +1,22 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { applyPromptResultToItem } = require("../src/background/queue-state.js");
+const { applyPromptResultToItem, formatRunSummary } = require("../src/background/queue-state.js");
+
+test("formatRunSummary renders counts, image word, and mm:ss", () => {
+  assert.equal(
+    formatRunSummary({ done: 6, failed: 0 }, 24, 154000),
+    "6 done, 0 failed, 24 images, 2:34"
+  );
+  assert.equal(
+    formatRunSummary({ done: 1, failed: 2 }, 1, 9000),
+    "1 done, 2 failed, 1 image, 0:09"
+  );
+  assert.equal(
+    formatRunSummary({}, 0, 0),
+    "0 done, 0 failed, 0 images, 0:00"
+  );
+});
 
 function makeAppState() {
   return {
