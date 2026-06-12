@@ -224,10 +224,7 @@ async function processQueue() {
         if (response.stage) addLog(`Complete stage: ${response.stage}${response.finalState ? ` (${response.finalState.outputCount} outputs)` : ""}`);
         if (response.warning) addLog(`Notice: ${response.warning}`);
         if (transition.warning) addLog(`Notice: ${transition.warning}`);
-        if (transition.warning && response.diag) {
-          const diag = response.diag;
-          addLog(`Wait diagnostics: outputs ${diag.baselineOutputs}->${diag.lastOutputs}, batch ${diag.batchFound ? `${diag.batchImages} loaded, busy ${diag.batchBusy}, percent ${diag.batchPercent}, stable ${diag.batchStableTicks}` : "missing"}, button ${diag.buttonFound ? (diag.buttonDisabled ? "disabled" : "idle") : "missing"}, idleTicks ${diag.idleButtonTicks}, sawBusy ${diag.sawBusy}`);
-        }
+        if (response.diag) addWaitDiagnostics(response.diag);
       } else if (transition.action === "retry") {
         addLog(`Retry ${item.attempts}/${appState.settings.retryLimit}: ${item.error}`);
       } else {
@@ -873,6 +870,18 @@ async function saveAndBroadcast() {
     });
   } catch (error) {
     // The popup may be closed.
+  }
+}
+
+function addWaitDiagnostics(diag) {
+  addLog(`Wait diagnostics: outputs ${diag.baselineOutputs}->${diag.lastOutputs}, newImages ${diag.newLoadedCount} (stable ${diag.newStableTicks}, baseline ${diag.baselineImages}), batch ${diag.batchFound ? `${diag.batchImages} busy ${diag.batchBusy} pct ${diag.batchPercent} stable ${diag.batchStableTicks}` : "missing"}, button ${diag.buttonFound ? (diag.buttonDisabled ? "disabled" : "idle") : "missing"}, idleTicks ${diag.idleButtonTicks}, sawBusy ${diag.sawBusy}`);
+
+  const probe = diag.probe;
+  if (probe) {
+    const top = Array.isArray(probe.topImgs)
+      ? probe.topImgs.map((img) => `${img.w}x${img.h}${img.loaded ? "L" : "-"}`).join(" ")
+      : "";
+    addLog(`DOM probe: batchGrid0=${probe.batchGrid0} collapsible=${probe.collapsible} anyBatch=${probe.anyBatchTestid} thumb=${probe.fireflyThumb} progress=${probe.progress} bigImgs=${probe.bigImgCount} top=[${top}]`);
   }
 }
 

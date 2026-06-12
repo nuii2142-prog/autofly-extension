@@ -413,14 +413,23 @@
     let stableTicks = 0;
     let idleButtonTicks = 0;
     let batchStableTicks = 0;
+    let newLoadedCount = 0;
+    let newStableTicks = 0;
+    let lastNewLoadedCount = -1;
     let lastStableKey = "";
     let lastBatchSignature = "";
     let lastObservedState = null;
+
+    // Pre-click image set. Generation has only just started here (Firefly shows
+    // skeletons first), so the freshly generated images are not loaded yet and
+    // will register as new once they render.
+    const baselineImageKeys = new Set(currentLoadedOutputImageKeys());
 
     const buildDiag = () => {
       const lastBatch = lastObservedState ? lastObservedState.batch : null;
       return {
         baselineOutputs: beforeState ? beforeState.outputCount || 0 : 0,
+        baselineImages: baselineImageKeys.size,
         lastOutputs: lastObservedState ? lastObservedState.outputCount : -1,
         lastLoading: lastObservedState ? lastObservedState.loadingCount : -1,
         lastSkeleton: lastObservedState ? lastObservedState.skeletonCount : -1,
@@ -431,10 +440,13 @@
         batchBusy: lastBatch ? lastBatch.busyCount : -1,
         batchPercent: Boolean(lastBatch && lastBatch.hasPercent),
         batchStableTicks,
+        newLoadedCount,
+        newStableTicks,
         idleButtonTicks,
         stableTicks,
         sawBusy,
-        sawChange
+        sawChange,
+        probe: batchDomProbe()
       };
     };
 
@@ -483,6 +495,14 @@
         lastBatchSignature = state.batch ? state.batch.signature : "";
       }
 
+      newLoadedCount = currentLoadedOutputImageKeys().filter((key) => !baselineImageKeys.has(key)).length;
+      if (newLoadedCount > 0 && newLoadedCount === lastNewLoadedCount) {
+        newStableTicks += 1;
+      } else {
+        newStableTicks = 0;
+        lastNewLoadedCount = newLoadedCount;
+      }
+
       lastObservedState = state;
 
       if (state.errorText) {
@@ -494,7 +514,7 @@
         beforeState,
         stableTicks,
         Date.now() - startedAt,
-        { busy, sawBusy, sawChange, idleButtonTicks, batchStableTicks }
+        { busy, sawBusy, sawChange, idleButtonTicks, batchStableTicks, newLoadedCount, newStableTicks }
       );
 
       if (settled.complete) {
@@ -502,7 +522,8 @@
           success: true,
           stage: settled.stage,
           warning: settled.warning,
-          finalState: state
+          finalState: state,
+          diag: buildDiag()
         };
       }
     }
@@ -587,6 +608,47 @@
       loadedCount,
       busyCount,
       hasPercent
+    };
+  }
+
+  // src keys of result <img> elements that are currently fully loaded. Used to
+  // detect images produced by THIS submission (keys absent from the pre-click
+  // baseline), independent of any Firefly-specific container markup.
+  function currentLoadedOutputImageKeys() {
+    return generateOutputElements()
+      .filter((element) => element.tagName === "IMG" && element.complete && element.naturalWidth > 20)
+      .map((element) => element.currentSrc || element.src)
+      .filter(Boolean);
+  }
+
+  // Compact, privacy-safe snapshot of the result area's structure. Logged by the
+  // background so an exported run reveals which batch selectors actually match
+  // on the live page and how result images are shaped — no prompt text, no full
+  // image URLs.
+  function batchDomProbe() {
+    const countVisible = (selector) => deepQuerySelectorAll(selector).filter(isVisible).length;
+    const resultImages = generateOutputElements().filter((element) => element.tagName === "IMG");
+    const topImgs = resultImages
+      .map((image) => {
+        const rect = image.getBoundingClientRect();
+        return {
+          w: Math.round(rect.width),
+          h: Math.round(rect.height),
+          top: Math.round(rect.top),
+          loaded: Boolean(image.complete && image.naturalWidth > 20)
+        };
+      })
+      .sort((a, b) => a.top - b.top)
+      .slice(0, 6);
+
+    return {
+      batchGrid0: countVisible('[data-testid="batch-grid-0"]'),
+      collapsible: countVisible("firefly-collapsible-batch-grid"),
+      anyBatchTestid: countVisible('[data-testid*="batch" i]'),
+      fireflyThumb: countVisible("firefly-thumbnail"),
+      progress: countVisible("[role='progressbar'], progress, [aria-busy='true']"),
+      bigImgCount: resultImages.length,
+      topImgs
     };
   }
 

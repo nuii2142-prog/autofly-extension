@@ -89,16 +89,35 @@
       }
     }
 
+    // Robust, selector-light primary signal: images that did NOT exist before
+    // the click have now finished loading and stopped arriving. Keyed on actual
+    // <img> load state (complete && naturalWidth>0), so it reflects the result
+    // being rendered, not merely the job being queued. Requires a busy phase
+    // (the generation actually ran) and a real time floor so a stray cached or
+    // lazy-loaded image cannot complete the wait in the first few seconds.
+    const newLoadedCount = Number(options.newLoadedCount) || 0;
+    const newStableTicks = Number(options.newStableTicks) || 0;
+    if (newLoadedCount >= 1 && sawBusy && newStableTicks >= 4 && elapsedMs > 10000) {
+      return {
+        complete: true,
+        stage: "generate-new-images-loaded",
+        warning: ""
+      };
+    }
+
     if (!batchUsable) {
-      // Fallback for pages without a usable batch container: the Generate
-      // button staying enabled after a busy phase, plus output growth. Weaker
-      // than batch tracking, so it needs more idle ticks.
+      // Last-resort fallback for pages where neither the batch card nor new
+      // result images are observable: the Generate button staying enabled after
+      // a busy phase, plus output growth. The high time floor keeps it from
+      // firing while a job is merely queued (the button re-enables early), so a
+      // generation that evades image detection still gets roughly its real run
+      // time before the next prompt is submitted.
       const idleButtonTicks = Number(options.idleButtonTicks) || 0;
       if (
         (outputIncreased || outputChanged)
         && sawBusy
         && idleButtonTicks >= 3
-        && elapsedMs > 5000
+        && elapsedMs > 25000
       ) {
         return {
           complete: true,

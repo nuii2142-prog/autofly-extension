@@ -202,7 +202,7 @@ test("isGenerateResultSettled falls back to button-idle when a batch card expose
     },
     { outputCount: 4, outputSignature: "baseline", batch: { found: false } },
     0,
-    20000,
+    26000,
     {
       busy: true,
       sawBusy: true,
@@ -258,7 +258,7 @@ test("isGenerateResultSettled completes via idle Generate button only when no ba
       outputSignature: "baseline"
     },
     0,
-    20000,
+    26000,
     {
       busy: true,
       sawBusy: true,
@@ -269,6 +269,82 @@ test("isGenerateResultSettled completes via idle Generate button only when no ba
 
   assert.equal(result.complete, true);
   assert.equal(result.stage, "generate-button-idle");
+});
+
+test("isGenerateResultSettled completes when new images have loaded and stabilized after a busy phase", () => {
+  const result = isGenerateResultSettled(
+    {
+      outputCount: 188,
+      outputSignature: "churn",
+      loadingCount: 0,
+      skeletonCount: 0,
+      generateButtonFound: true,
+      generateButtonDisabled: false,
+      batch: { found: false }
+    },
+    { outputCount: 184, outputSignature: "baseline", batch: { found: false } },
+    0,
+    26000,
+    {
+      busy: false,
+      sawBusy: true,
+      sawChange: true,
+      newLoadedCount: 4,
+      newStableTicks: 4,
+      idleButtonTicks: 9
+    }
+  );
+
+  assert.equal(result.complete, true);
+  assert.equal(result.stage, "generate-new-images-loaded");
+});
+
+test("isGenerateResultSettled does not complete on new images until they stop arriving", () => {
+  const result = isGenerateResultSettled(
+    { outputCount: 186, outputSignature: "churn", loadingCount: 0, skeletonCount: 0, generateButtonFound: true, generateButtonDisabled: false, batch: { found: false } },
+    { outputCount: 184, outputSignature: "baseline", batch: { found: false } },
+    0,
+    15000,
+    { busy: false, sawBusy: true, sawChange: true, newLoadedCount: 2, newStableTicks: 1, idleButtonTicks: 9 }
+  );
+
+  assert.equal(result.complete, false);
+});
+
+test("isGenerateResultSettled does not complete on new images before the time floor", () => {
+  const result = isGenerateResultSettled(
+    { outputCount: 188, outputSignature: "churn", loadingCount: 0, skeletonCount: 0, generateButtonFound: true, generateButtonDisabled: false, batch: { found: false } },
+    { outputCount: 184, outputSignature: "baseline", batch: { found: false } },
+    0,
+    7000,
+    { busy: false, sawBusy: true, sawChange: true, newLoadedCount: 4, newStableTicks: 6, idleButtonTicks: 9 }
+  );
+
+  assert.equal(result.complete, false);
+});
+
+test("isGenerateResultSettled does not complete on new images without an observed busy phase", () => {
+  const result = isGenerateResultSettled(
+    { outputCount: 188, outputSignature: "churn", loadingCount: 0, skeletonCount: 0, generateButtonFound: true, generateButtonDisabled: false, batch: { found: false } },
+    { outputCount: 184, outputSignature: "baseline", batch: { found: false } },
+    0,
+    30000,
+    { busy: false, sawBusy: false, sawChange: true, newLoadedCount: 4, newStableTicks: 6, idleButtonTicks: 9 }
+  );
+
+  assert.equal(result.complete, false);
+});
+
+test("isGenerateResultSettled does not complete via button-idle at the old premature elapsed", () => {
+  const result = isGenerateResultSettled(
+    { outputCount: 8, outputSignature: "churn", loadingCount: 0, skeletonCount: 0, generateButtonFound: true, generateButtonDisabled: false, batch: { found: false } },
+    { outputCount: 4, outputSignature: "baseline", batch: { found: false } },
+    0,
+    7000,
+    { busy: true, sawBusy: true, sawChange: true, idleButtonTicks: 5 }
+  );
+
+  assert.equal(result.complete, false);
 });
 
 test("isGenerateResultSettled does not complete by button signal while button is disabled", () => {

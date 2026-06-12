@@ -37,7 +37,8 @@ Use this after code changes that affect popup, background runner, content script
 - Verify the run advances only AFTER the new batch card's images are fully rendered (stage "generate-batch-loaded"), not seconds after clicking Generate while the card still shows a percent indicator.
 - Run several prompts back to back and verify every prompt produces a finished batch in Firefly: N prompts in the queue must equal N completed batches on the page.
 - Verify the rhythm is: batch finishes -> delay -> next prompt submits, with no full-timeout stalls between prompts.
-- If a prompt still completes via the timeout fallback, verify the activity log contains a "Wait diagnostics:" line (numbers only, no prompt text) and report it.
+- Verify completion waits for the result images to actually render. The fastest healthy completion stage is "generate-new-images-loaded" (or "generate-batch-loaded"); "generate-button-idle" should be rare and only after a long elapsed time.
+- Every completed prompt now logs a "Wait diagnostics:" and "DOM probe:" line (numbers/sizes only, no prompt text). When tuning detection, export the log and read these: `batchGrid0`/`collapsible`/`anyBatch` counts show whether the batch selectors match the live page, and `newImages N` shows how many freshly loaded result images were detected.
 
 ## Error Detection Accuracy
 
