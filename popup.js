@@ -53,6 +53,7 @@ function bindElements() {
     "download-subfolder",
     "auto-delete",
     "continue-on-error",
+    "sound-on-complete",
     "current-prompt",
     "progress-label",
     "progress-fill",
@@ -121,7 +122,8 @@ function bindUiEvents() {
     "platformMode",
     "autoDownload",
     "autoDelete",
-    "continueOnError"
+    "continueOnError",
+    "soundOnComplete"
   ].forEach((key) => {
     elements[key].addEventListener("change", saveDraftSoon);
   });
@@ -158,6 +160,7 @@ async function loadDraft() {
   elements.downloadSubfolder.value = settings.downloadSubfolder || "";
   elements.autoDelete.checked = Boolean(settings.autoDelete);
   elements.continueOnError.checked = Boolean(settings.continueOnError);
+  elements.soundOnComplete.checked = settings.soundOnComplete !== false;
   elements.delayOutput.textContent = `${settings.delay}s`;
   elements.timeoutOutput.textContent = `${settings.timeout}s`;
 
@@ -342,7 +345,8 @@ function readSettings() {
     dedupe: elements.dedupePrompts.checked,
     prefix: elements.promptPrefix.value.trim(),
     suffix: elements.promptSuffix.value.trim(),
-    downloadSubfolder: elements.downloadSubfolder.value.trim()
+    downloadSubfolder: elements.downloadSubfolder.value.trim(),
+    soundOnComplete: elements.soundOnComplete.checked
   };
 }
 

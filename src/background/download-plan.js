@@ -46,7 +46,15 @@
   }
 
   function extensionFromUrl(url) {
-    const path = String(url || "").split(/[?#]/)[0];
+    const value = String(url || "");
+
+    const dataMatch = value.match(/^data:image\/(jpe?g|png|webp|gif|avif)/i);
+    if (dataMatch) {
+      const type = dataMatch[1].toLowerCase();
+      return type === "jpeg" || type === "jpg" ? ".jpg" : `.${type}`;
+    }
+
+    const path = value.split(/[?#]/)[0];
     const match = path.match(/\.(jpe?g|png|webp|gif|avif)$/i);
     return match ? `.${match[1].toLowerCase()}` : ".jpg";
   }
@@ -61,7 +69,7 @@
     const index = Number(opts.index) || 0;
     const slug = promptSlug(opts.prompt);
     const urls = (Array.isArray(opts.urls) ? opts.urls : [])
-      .filter((url) => /^https?:\/\//i.test(String(url || "")));
+      .filter((url) => /^(https?:\/\/|data:image\/)/i.test(String(url || "")));
     const many = urls.length > 1;
 
     return urls.map((url, position) => {

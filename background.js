@@ -196,6 +196,7 @@ async function processQueue() {
         stopWorkerKeepAlive();
         addLog("Queue complete");
         await saveAndBroadcast();
+        await playCompletionSound("complete");
         break;
       }
 
@@ -243,6 +244,7 @@ async function processQueue() {
           appState.finishedAt = Date.now();
           stopWorkerKeepAlive();
           await saveAndBroadcast();
+          await playCompletionSound("error");
           break;
         }
       }
@@ -265,6 +267,7 @@ async function processQueue() {
     stopWorkerKeepAlive();
     addLog(`Error: ${error.message}`);
     await saveAndBroadcast();
+    await playCompletionSound("error");
   } finally {
     queueLoopRunning = false;
     if (appState.status !== "Running") {
@@ -683,6 +686,29 @@ async function autoDownloadResultImages(item, response) {
     addLog(`Downloaded ${saved} image${saved > 1 ? "s" : ""} to ${folder}/`);
     const active = appState.queue.find((entry) => entry.id === item.id);
     if (active && active.meta) active.meta.downloads = saved;
+  }
+}
+
+async function playCompletionSound(tone) {
+  if (!appState.settings.soundOnComplete) return;
+  if (!chrome.offscreen) return;
+
+  try {
+    const hasDocument = await chrome.offscreen.hasDocument();
+    if (!hasDocument) {
+      await chrome.offscreen.createDocument({
+        url: "offscreen.html",
+        reasons: ["AUDIO_PLAYBACK"],
+        justification: "Play a short chime when the prompt queue finishes."
+      });
+    }
+    chrome.runtime.sendMessage({ action: "PLAY_COMPLETION_SOUND", tone }, () => {
+      if (chrome.runtime.lastError) {
+        // No receiver yet; ignore.
+      }
+    });
+  } catch (error) {
+    // Offscreen audio unavailable; a missing chime must never break a run.
   }
 }
 

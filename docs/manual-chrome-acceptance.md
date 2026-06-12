@@ -52,8 +52,15 @@ Use this after code changes that affect popup, background runner, content script
 - Run two prompts and verify images are saved silently (no Save As dialog) into `Downloads\<that folder>\`.
 - Verify filenames follow `NNN-prompt-words.jpg` (e.g. `001-young-couple-kitchen.jpg`), with `-1/-2` suffixes when a prompt yields several images.
 - Verify only the generated result images are saved — not unrelated page/gallery thumbnails — and the count per prompt is small.
-- Verify the activity log shows `Downloaded N images to <folder>/`. If it instead shows "via Firefly button", the direct image URL was unavailable (blob); report it.
+- Verify the activity log shows `Downloaded N images to <folder>/` with NO Save As / confirmation dialog. (Blob result images are converted to data URLs so the silent path still applies; "via Firefly button" should now be rare.)
 - After updating the extension, accept the new "Manage your downloads" permission prompt on reload.
+
+## Completion Sound
+
+- Leave "Sound when finished" on and run a short queue.
+- Verify a short chime plays when the queue reaches Complete, even with the popup closed.
+- Turn the toggle off, run again, and verify no sound plays.
+- Verify a run that ends in Error (Continue-after-errors off, a forced failure) plays the distinct error tone.
 
 ## Auto-Download Safety (fallback button path)
 

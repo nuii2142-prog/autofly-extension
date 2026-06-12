@@ -49,6 +49,25 @@ test("extensionFromUrl reads the image extension or defaults to jpg", () => {
   assert.equal(extensionFromUrl("https://cdn.firefly.com/no-extension"), ".jpg");
 });
 
+test("extensionFromUrl reads the mime type from a data URL", () => {
+  assert.equal(extensionFromUrl("data:image/png;base64,AAAA"), ".png");
+  assert.equal(extensionFromUrl("data:image/webp;base64,AAAA"), ".webp");
+  assert.equal(extensionFromUrl("data:image/jpeg;base64,AAAA"), ".jpg");
+});
+
+test("buildDownloadPlan accepts data URLs as well as http(s)", () => {
+  const plan = buildDownloadPlan({
+    urls: ["data:image/png;base64,AAAA", "blob:nope", "https://cdn/ok.jpg"],
+    index: 2,
+    prompt: "two images",
+    subfolder: "x"
+  });
+
+  assert.equal(plan.length, 2);
+  assert.equal(plan[0].filename, "x/002-two-images-1.png");
+  assert.equal(plan[1].filename, "x/002-two-images-2.jpg");
+});
+
 test("buildDownloadPlan names a single image by position and prompt slug", () => {
   const plan = buildDownloadPlan({
     urls: ["https://cdn.firefly.com/img1.jpg?x=1"],
@@ -78,7 +97,7 @@ test("buildDownloadPlan suffixes multiple images per prompt", () => {
   assert.equal(plan[1].filename, "shots/012-close-up-diverse-hands-2.png");
 });
 
-test("buildDownloadPlan drops non-http(s) urls (e.g. blob/data)", () => {
+test("buildDownloadPlan drops blob urls but keeps http(s) and data urls", () => {
   const plan = buildDownloadPlan({
     urls: ["blob:https://firefly.adobe.com/abc", "data:image/png;base64,xxxx", "https://cdn/ok.jpg"],
     index: 3,
@@ -86,8 +105,9 @@ test("buildDownloadPlan drops non-http(s) urls (e.g. blob/data)", () => {
     subfolder: "x"
   });
 
-  assert.equal(plan.length, 1);
-  assert.equal(plan[0].url, "https://cdn/ok.jpg");
+  assert.equal(plan.length, 2);
+  assert.equal(plan[0].url, "data:image/png;base64,xxxx");
+  assert.equal(plan[1].url, "https://cdn/ok.jpg");
 });
 
 test("buildDownloadPlan returns an empty plan when no usable urls exist", () => {

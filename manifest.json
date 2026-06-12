@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Nuii AutoFly Studio",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Bulk prompt automation for AI image generation workflows in the browser.",
   "action": {
     "default_popup": "popup.html",
@@ -31,7 +31,8 @@
     "activeTab",
     "scripting",
     "debugger",
-    "downloads"
+    "downloads",
+    "offscreen"
   ],
   "host_permissions": [
     "https://firefly.adobe.com/*"

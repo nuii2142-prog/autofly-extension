@@ -144,10 +144,15 @@
       beforeState
     });
 
-    // Prefer downloading the captured result image URLs directly from the
-    // background (silent, into the chosen subfolder). Only click Firefly's own
-    // download button as a fallback when no direct http(s) URL was captured.
-    const imageUrls = (result.imageUrls || []).filter((url) => /^https?:\/\//i.test(String(url || "")));
+    // Prefer downloading the captured result images directly from the
+    // background (silent, into the chosen subfolder). http(s) URLs pass through
+    // (Chrome's downloader fetches them, cross-origin is fine); blob: URLs are
+    // converted to data URLs here since the background cannot resolve a page
+    // blob. Only click Firefly's own download button when nothing is usable.
+    let imageUrls = [];
+    if (result.success && autoDownload) {
+      imageUrls = await toDownloadableUrls(result.imageUrls || []);
+    }
     let fallbackDownloads = 0;
     if (result.success && autoDownload && imageUrls.length === 0) {
       fallbackDownloads = await clickDownloadButtons();
@@ -431,10 +436,14 @@
     let lastBatchSignature = "";
     let lastObservedState = null;
 
-    // Pre-click image set. Generation has only just started here (Firefly shows
-    // skeletons first), so the freshly generated images are not loaded yet and
-    // will register as new once they render.
-    const baselineImageKeys = new Set(currentLoadedOutputImageKeys());
+    // Pre-click image set. Use the baseline captured in submitPrompt (before
+    // Generate was clicked) when available; capturing it live here would run
+    // after generation already started and miss the new images entirely.
+    const baselineImageKeys = new Set(
+      (beforeState && Array.isArray(beforeState.imageKeys) && beforeState.imageKeys.length)
+        ? beforeState.imageKeys
+        : currentLoadedOutputImageKeys()
+    );
 
     const buildDiag = () => {
       const lastBatch = lastObservedState ? lastObservedState.batch : null;
@@ -560,12 +569,17 @@
     const button = findGenerateButtonForState();
     const promptValue = getPromptValue();
     const batch = newestBatchState();
+    const imageKeys = outputs
+      .filter((element) => element.tagName === "IMG" && element.complete && element.naturalWidth > 20)
+      .map((element) => element.currentSrc || element.src)
+      .filter(Boolean);
 
     return {
       loadingCount,
       skeletonCount,
       outputCount: outputs.length,
       outputSignature,
+      imageKeys,
       batch,
       promptSeen: resultPromptSeen(prompt, visibleText),
       promptValue,
@@ -621,6 +635,38 @@
       busyCount,
       hasPercent
     };
+  }
+
+  // Turn result image sources into URLs the background can download silently.
+  // http(s) pass straight through; blob: URLs are read in the page context and
+  // re-encoded as data URLs (limited to a sane count to bound message size).
+  async function toDownloadableUrls(keys) {
+    const out = [];
+    for (const key of (keys || []).slice(0, 8)) {
+      const value = String(key || "");
+      if (/^https?:\/\//i.test(value) || /^data:image\//i.test(value)) {
+        out.push(value);
+      } else if (/^blob:/i.test(value)) {
+        const dataUrl = await blobUrlToDataUrl(value);
+        if (dataUrl) out.push(dataUrl);
+      }
+    }
+    return out;
+  }
+
+  async function blobUrlToDataUrl(blobUrl) {
+    try {
+      const response = await fetch(blobUrl);
+      const blob = await response.blob();
+      return await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(blob);
+      });
+    } catch (error) {
+      return null;
+    }
   }
 
   // src keys of result <img> elements that are currently fully loaded. Used to
