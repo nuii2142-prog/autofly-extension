@@ -4,8 +4,28 @@ const assert = require("node:assert/strict");
 const {
   chooseResultWaitStrategy,
   shouldGuardFireflyRedirect,
-  shouldReturnToGenerateAfterWait
+  shouldReturnToGenerateAfterWait,
+  shouldRefreshFireflyPage
 } = require("../src/background/route-policy.js");
+
+test("shouldRefreshFireflyPage refreshes only Firefly runs at the configured interval", () => {
+  assert.equal(
+    shouldRefreshFireflyPage({ platform: "firefly", promptsSinceRefresh: 10, refreshEvery: 10 }),
+    true
+  );
+  assert.equal(
+    shouldRefreshFireflyPage({ platform: "firefly", promptsSinceRefresh: 14, refreshEvery: 10 }),
+    true
+  );
+  assert.equal(
+    shouldRefreshFireflyPage({ platform: "firefly", promptsSinceRefresh: 3, refreshEvery: 10 }),
+    false
+  );
+  assert.equal(
+    shouldRefreshFireflyPage({ platform: "current-tab", promptsSinceRefresh: 99, refreshEvery: 10 }),
+    false
+  );
+});
 const { applyPromptResultToItem } = require("../src/background/queue-state.js");
 
 test("chooseResultWaitStrategy waits on Generate or History based on current Firefly route", () => {

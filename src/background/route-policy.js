@@ -46,13 +46,24 @@
     return /receiving end|message port closed|extension context invalidated|frame with ID|No response/i.test(String(error || ""));
   }
 
+  // A Firefly Generate feed that accumulates many batches starts virtualizing
+  // images, which blinds result detection (observed at ~50 batches: zero
+  // detectable result images and intermittent full-timeout stalls). Reloading
+  // the tab between prompts keeps the feed small and detection reliable.
+  function shouldRefreshFireflyPage(options) {
+    const opts = options || {};
+    return opts.platform === "firefly"
+      && Number(opts.promptsSinceRefresh) >= Number(opts.refreshEvery);
+  }
+
   const api = {
     isFireflyGenerateUrl,
     isFireflyHistoryUrl,
     chooseResultWaitStrategy,
     shouldGuardFireflyRedirect,
     shouldReturnToGenerateAfterWait,
-    shouldRecoverWaitError
+    shouldRecoverWaitError,
+    shouldRefreshFireflyPage
   };
 
   root.NuiiBackgroundRoutePolicy = api;

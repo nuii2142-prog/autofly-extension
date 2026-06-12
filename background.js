@@ -9,6 +9,9 @@ importScripts(
 
 const STORAGE_KEY = "nuiiAutoflyState";
 const LOG_LIMIT = 80;
+// Reload the Firefly tab after this many Generate clicks (and once at run
+// start) so the results feed stays small enough for reliable detection.
+const FIREFLY_REFRESH_EVERY = 10;
 
 const DEFAULT_SETTINGS = globalThis.NuiiShared.DEFAULT_SETTINGS;
 const RoutePolicy = globalThis.NuiiBackgroundRoutePolicy;
@@ -26,6 +29,7 @@ const DEFAULT_STATE = {
   currentPrompt: "",
   currentItemId: null,
   waitingForResult: false,
+  promptsSinceRefresh: 0,
   runId: null,
   startedAt: null,
   finishedAt: null,
@@ -126,6 +130,9 @@ function startProcessing(request) {
     targetTabId: request.targetTabId || null,
     targetUrl: request.targetUrl || "",
     targetTitle: request.targetTitle || "",
+    // Seed at the threshold so the first prompt refreshes the page, clearing
+    // any batches left over from a previous run on the same tab.
+    promptsSinceRefresh: FIREFLY_REFRESH_EVERY,
     runId: String(Date.now()),
     startedAt: Date.now(),
     logs: []
@@ -211,6 +218,7 @@ async function processQueue() {
       await saveAndBroadcast();
 
       const response = await runPrompt(item);
+      appState.promptsSinceRefresh += 1;
 
       if (appState.status !== "Running" || stopRequested) {
         if (item.status === "running") item.status = "pending";
@@ -292,6 +300,20 @@ async function runPrompt(item) {
 
   if (appState.settings.platform === "firefly") {
     await keepTabAwake(tabId);
+
+    if (RoutePolicy.shouldRefreshFireflyPage({
+      platform: appState.settings.platform,
+      promptsSinceRefresh: appState.promptsSinceRefresh,
+      refreshEvery: FIREFLY_REFRESH_EVERY
+    })) {
+      const refreshed = await refreshFireflyTab(tabId);
+      if (refreshed) {
+        appState.promptsSinceRefresh = 0;
+        addLog("Refreshed Firefly page to keep result detection reliable");
+        await saveAndBroadcast();
+      }
+    }
+
     const navigation = await navigateToFireflyGenerate(tabId);
     if (!navigation.success) return navigation;
   }
@@ -671,6 +693,35 @@ async function playCompletionSound(tone) {
   } catch (error) {
     // Offscreen audio unavailable; a missing chime must never break a run.
   }
+}
+
+async function refreshFireflyTab(tabId) {
+  try {
+    await chrome.tabs.reload(tabId);
+  } catch (error) {
+    return false;
+  }
+
+  // Wait for the reload to finish: leave "complete" first, then return to it.
+  // If the loading phase was too fast to observe, accept a completed tab after
+  // a short grace period instead of waiting out the whole window.
+  const startedAt = Date.now();
+  let sawLoading = false;
+
+  while (Date.now() - startedAt < 20000) {
+    await delay(500);
+    const tab = await safeGetTab(tabId);
+    if (!tab) return false;
+
+    if (tab.status !== "complete") {
+      sawLoading = true;
+    } else if (sawLoading || Date.now() - startedAt > 4000) {
+      break;
+    }
+  }
+
+  await delay(1500);
+  return true;
 }
 
 async function navigateToFireflyGenerate(tabId) {

@@ -53,6 +53,14 @@ Use this after code changes that affect popup, background runner, content script
 - Verify the number downloaded per prompt matches that prompt's image count (e.g. 4), NOT the older batches still on the page. The activity log shows `Downloaded N image(s)` per prompt.
 - Note: downloads use Firefly's native control, so the file goes to the standard Downloads location. If Chrome's "Ask where to save each file before downloading" setting is on, the browser will prompt — turn that setting off for fully unattended runs.
 
+## Long-Run Page Refresh
+
+- Start a run on a Firefly tab that already shows batches from a previous session.
+- Verify the log shows "Refreshed Firefly page to keep result detection reliable" before prompt 1, and the feed starts clean.
+- Run 12+ prompts and verify another refresh happens after the 10th, with no stall: prompts continue completing in normal (~20-30s) time before and after the refresh.
+- Verify long runs no longer hit intermittent full-timeout stalls once the page has accumulated 50+ batches, and "Wait diagnostics" stops reporting bigImgs=0.
+- Verify Current-tab platform mode never auto-reloads the tab.
+
 ## Run Summary
 
 - Run a multi-prompt queue to completion.

@@ -11,6 +11,7 @@ Original Chrome extension for bulk prompt automation on browser-based AI image t
 - Auto-download of full-resolution results through Firefly's own download control, to the standard Downloads folder.
 - Optional completion chime when the queue finishes, played from an offscreen document.
 - Completion is detected from result images actually finishing rendering, so the next prompt only starts once the current images are done.
+- The Firefly tab is auto-refreshed at run start and every 10 prompts, preventing the detection stalls that appear once the results feed accumulates ~50 batches.
 - More resilient page automation for prompt inputs, generate buttons, busy states, output changes, and download buttons.
 - Split submit/wait runner: the extension sends a prompt to the Firefly Generate prompt box, clicks Generate once, then waits for completed outputs on the Generate page before starting the next delay.
 - Debugger/CDP click path: the Generate button is clicked through Chrome's debugger input API instead of plain `element.click()`, which is closer to a real browser click.
