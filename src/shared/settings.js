@@ -14,7 +14,8 @@
     stayOnGenerate: true,
     dedupe: true,
     prefix: "",
-    suffix: ""
+    suffix: "",
+    downloadSubfolder: "Firefly-AutoFly"
   };
 
   function sanitizeSettings(settings) {
@@ -31,7 +32,8 @@
       stayOnGenerate: input.stayOnGenerate !== false,
       dedupe: input.dedupe !== false,
       prefix: String(input.prefix || "").trim(),
-      suffix: String(input.suffix || "").trim()
+      suffix: String(input.suffix || "").trim(),
+      downloadSubfolder: String(input.downloadSubfolder || DEFAULT_SETTINGS.downloadSubfolder).slice(0, 120)
     };
   }
 

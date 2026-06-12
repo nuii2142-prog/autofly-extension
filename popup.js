@@ -49,6 +49,8 @@ function bindElements() {
     "retry-limit",
     "platform-mode",
     "auto-download",
+    "subfolder-row",
+    "download-subfolder",
     "auto-delete",
     "continue-on-error",
     "current-prompt",
@@ -124,6 +126,9 @@ function bindUiEvents() {
     elements[key].addEventListener("change", saveDraftSoon);
   });
 
+  elements.autoDownload.addEventListener("change", updateSubfolderVisibility);
+  elements.downloadSubfolder.addEventListener("input", saveDraftSoon);
+
   elements.startBtn.addEventListener("click", handleStartOrResume);
   elements.pauseBtn.addEventListener("click", () => sendMessage({ action: "PAUSE_PROCESSING" }));
   elements.stopBtn.addEventListener("click", () => sendMessage({ action: "STOP_PROCESSING" }));
@@ -150,6 +155,7 @@ async function loadDraft() {
   elements.retryLimit.value = String(settings.retryLimit);
   elements.platformMode.value = settings.platform;
   elements.autoDownload.checked = Boolean(settings.autoDownload);
+  elements.downloadSubfolder.value = settings.downloadSubfolder || "";
   elements.autoDelete.checked = Boolean(settings.autoDelete);
   elements.continueOnError.checked = Boolean(settings.continueOnError);
   elements.delayOutput.textContent = `${settings.delay}s`;
@@ -162,7 +168,12 @@ async function loadDraft() {
   }
 
   setSourceMode(draft && draft.sourceMode ? draft.sourceMode : "paste");
+  updateSubfolderVisibility();
   updatePromptCount();
+}
+
+function updateSubfolderVisibility() {
+  elements.subfolderRow.classList.toggle("hidden", !elements.autoDownload.checked);
 }
 
 function saveDraftSoon() {
@@ -330,7 +341,8 @@ function readSettings() {
     platform: elements.platformMode.value,
     dedupe: elements.dedupePrompts.checked,
     prefix: elements.promptPrefix.value.trim(),
-    suffix: elements.promptSuffix.value.trim()
+    suffix: elements.promptSuffix.value.trim(),
+    downloadSubfolder: elements.downloadSubfolder.value.trim()
   };
 }
 

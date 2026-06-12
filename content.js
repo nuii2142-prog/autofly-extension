@@ -144,9 +144,13 @@
       beforeState
     });
 
-    let downloads = 0;
-    if (result.success && autoDownload) {
-      downloads = await clickDownloadButtons();
+    // Prefer downloading the captured result image URLs directly from the
+    // background (silent, into the chosen subfolder). Only click Firefly's own
+    // download button as a fallback when no direct http(s) URL was captured.
+    const imageUrls = (result.imageUrls || []).filter((url) => /^https?:\/\//i.test(String(url || "")));
+    let fallbackDownloads = 0;
+    if (result.success && autoDownload && imageUrls.length === 0) {
+      fallbackDownloads = await clickDownloadButtons();
     }
 
     if (result.success) {
@@ -161,7 +165,9 @@
       code: result.code || "",
       finalState: result.finalState || null,
       diag: result.diag || null,
-      downloads,
+      imageUrls,
+      fallbackDownloads,
+      downloads: fallbackDownloads,
       elapsedMs: Date.now() - startedAt,
       error: result.error || ""
     };
@@ -213,6 +219,9 @@
       );
 
       if (settled.complete) {
+        // The History route renders thumbnails without stable direct URLs, so
+        // it downloads through Firefly's own button (background skips its direct
+        // download when no http(s) URL is provided).
         let downloads = 0;
         if (settings.autoDownload) {
           downloads = await clickDownloadButtons();
@@ -223,6 +232,8 @@
           warning: settled.warning,
           stage: settled.stage,
           finalState: state,
+          imageUrls: [],
+          fallbackDownloads: downloads,
           downloads,
           elapsedMs: Date.now() - startedAt,
           error: ""
@@ -523,7 +534,8 @@
           stage: settled.stage,
           warning: settled.warning,
           finalState: state,
-          diag: buildDiag()
+          diag: buildDiag(),
+          imageUrls: currentLoadedOutputImageKeys().filter((key) => !baselineImageKeys.has(key))
         };
       }
     }

@@ -46,10 +46,18 @@ Use this after code changes that affect popup, background runner, content script
 - Verify the run is NOT failed by marketing copy: the prompt should complete or time out, never fail within seconds with promo text as the error.
 - If a real decline occurs (prompt declined / reached your generation limit), verify it is still reported as a failure with the page's actual error text.
 
-## Auto-Download Safety
+## Auto-Download
 
-- Enable Auto-download and run one prompt.
-- Verify result download controls are clicked, but footer/navigation links containing "download" (for example "Download the app") are never clicked.
+- Enable Auto-download; a "Save to folder" field appears. Leave it as "Firefly-AutoFly" or set a custom name.
+- Run two prompts and verify images are saved silently (no Save As dialog) into `Downloads\<that folder>\`.
+- Verify filenames follow `NNN-prompt-words.jpg` (e.g. `001-young-couple-kitchen.jpg`), with `-1/-2` suffixes when a prompt yields several images.
+- Verify only the generated result images are saved — not unrelated page/gallery thumbnails — and the count per prompt is small.
+- Verify the activity log shows `Downloaded N images to <folder>/`. If it instead shows "via Firefly button", the direct image URL was unavailable (blob); report it.
+- After updating the extension, accept the new "Manage your downloads" permission prompt on reload.
+
+## Auto-Download Safety (fallback button path)
+
+- When the direct URL path is unavailable, result download controls are clicked, but footer/navigation links containing "download" (for example "Download the app") are never clicked.
 - Verify the Firefly tab is not navigated away by the auto-download pass.
 
 ## Double-Start Guard
