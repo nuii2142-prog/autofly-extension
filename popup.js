@@ -48,6 +48,7 @@ function bindElements() {
     "timeout-output",
     "retry-limit",
     "platform-mode",
+    "resolution-select",
     "auto-download",
     "auto-delete",
     "continue-on-error",
@@ -118,6 +119,7 @@ function bindUiEvents() {
   [
     "retryLimit",
     "platformMode",
+    "resolutionSelect",
     "autoDownload",
     "autoDelete",
     "continueOnError",
@@ -151,6 +153,7 @@ async function loadDraft() {
   elements.timeoutSlider.value = settings.timeout;
   elements.retryLimit.value = String(settings.retryLimit);
   elements.platformMode.value = settings.platform;
+  elements.resolutionSelect.value = settings.resolution;
   elements.autoDownload.checked = Boolean(settings.autoDownload);
   elements.autoDelete.checked = Boolean(settings.autoDelete);
   elements.continueOnError.checked = Boolean(settings.continueOnError);
@@ -331,6 +334,7 @@ function readSettings() {
     autoDelete: elements.autoDelete.checked,
     continueOnError: elements.continueOnError.checked,
     platform: elements.platformMode.value,
+    resolution: elements.resolutionSelect.value,
     dedupe: elements.dedupePrompts.checked,
     prefix: elements.promptPrefix.value.trim(),
     suffix: elements.promptSuffix.value.trim(),

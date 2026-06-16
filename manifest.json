@@ -17,6 +17,7 @@
         "src/shared/text.js",
         "src/shared/message.js",
         "src/content/firefly-selectors.js",
+        "src/content/resolution-control.js",
         "src/content/generation-result.js",
         "src/content/history-result.js",
         "src/content/prompt-control.js",

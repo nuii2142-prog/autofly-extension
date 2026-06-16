@@ -3,6 +3,8 @@
   const text = shared.clampNumber ? shared : require("./text.js");
   const clampNumber = text.clampNumber;
 
+  const RESOLUTION_VALUES = ["1K", "2K"];
+
   const DEFAULT_SETTINGS = {
     delay: 5,
     timeout: 240,
@@ -11,6 +13,7 @@
     autoDelete: true,
     continueOnError: true,
     platform: "firefly",
+    resolution: "2K",
     stayOnGenerate: true,
     dedupe: true,
     prefix: "",
@@ -29,6 +32,7 @@
       autoDelete: Boolean(input.autoDelete),
       continueOnError: Boolean(input.continueOnError),
       platform: input.platform === "current-tab" ? "current-tab" : "firefly",
+      resolution: RESOLUTION_VALUES.includes(input.resolution) ? input.resolution : DEFAULT_SETTINGS.resolution,
       stayOnGenerate: input.stayOnGenerate !== false,
       dedupe: input.dedupe !== false,
       prefix: String(input.prefix || "").trim(),

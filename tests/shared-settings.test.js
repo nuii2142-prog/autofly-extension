@@ -33,6 +33,14 @@ test("sanitizeSettings clamps numeric controls and preserves booleans", () => {
   assert.equal(settings.stayOnGenerate, false);
 });
 
+test("sanitizeSettings defaults resolution to 2K and only accepts known values", () => {
+  assert.equal(sanitizeSettings({}).resolution, "2K");
+  assert.equal(sanitizeSettings({ resolution: "1K" }).resolution, "1K");
+  assert.equal(sanitizeSettings({ resolution: "2K" }).resolution, "2K");
+  assert.equal(sanitizeSettings({ resolution: "8K" }).resolution, "2K");
+  assert.equal(sanitizeSettings({ resolution: 2 }).resolution, "2K");
+});
+
 test("normalizeTabMessageResponse turns missing content responses into explicit failures", () => {
   assert.deepEqual(
     normalizeTabMessageResponse(undefined, "Could not establish connection. Receiving end does not exist."),

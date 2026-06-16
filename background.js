@@ -162,6 +162,9 @@ function startProcessing(request) {
   stopRequested = false;
   startWorkerKeepAlive();
   addLog(`Loaded ${appState.queue.length} prompts`);
+  if (settings.platform === "firefly") {
+    addLog(`Resolution target for this run: ${settings.resolution}`);
+  }
   if (!chrome.debugger) {
     addLog("Debugger fallback unavailable; using DOM clicks only");
   }
@@ -351,7 +354,8 @@ async function runPrompt(item) {
     settings: {
       timeout: appState.settings.timeout,
       autoDownload: appState.settings.autoDownload,
-      platform: appState.settings.platform
+      platform: appState.settings.platform,
+      resolution: appState.settings.resolution
     }
   });
 

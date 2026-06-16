@@ -8,6 +8,7 @@
   const FireflySelectors = globalThis.NuiiContentSelectors;
   const GenerationResult = globalThis.NuiiContentGeneration;
   const PromptControl = globalThis.NuiiContentPrompt;
+  const ResolutionControl = globalThis.NuiiContentResolution;
 
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "PING") {
@@ -21,7 +22,7 @@
     }
 
     if (request.action === "SUBMIT_PROMPT" || request.action === "PROCESS_PROMPT") {
-      submitPrompt(request.prompt)
+      submitPrompt(request.prompt, request.settings || {})
         .then(sendResponse)
         .catch((error) => sendResponse({ success: false, error: error.message }));
       return true;
@@ -82,9 +83,10 @@
     return false;
   });
 
-  async function submitPrompt(prompt) {
+  async function submitPrompt(prompt, settings = {}) {
     const startedAt = Date.now();
     await preferGridView();
+    const resolution = await applyResolution(settings.resolution);
     const input = await waitFor(() => findPromptInput(), 12000, 250);
 
     if (!input) {
@@ -127,9 +129,89 @@
       generateButton: buttonRect,
       generateButtons: buttonCandidates,
       state: generatePageState(prompt),
+      resolution,
       elapsedMs: Date.now() - startedAt,
       error: ""
     };
+  }
+
+  // Re-apply the requested image resolution before each Generate. A Firefly tab
+  // reload resets the picker to its 1K default, and the picker selection is not
+  // persisted anywhere we can pre-seed (no relevant localStorage key), so the
+  // only reliable path is to drive the Spectrum menu the same way a user would.
+  // A failure here never blocks the run: it returns a reason and we generate at
+  // whatever resolution the page currently holds.
+  async function applyResolution(target) {
+    if (!ResolutionControl || !ResolutionControl.isSupportedResolution(target)) {
+      return { applied: false, reason: "unsupported", target: target || null };
+    }
+
+    const readItems = () =>
+      deepQuerySelectorAll(ResolutionControl.RESOLUTION_ITEM_SELECTOR).map((element) => ({
+        value: element.getAttribute("value") || element.getAttribute("data-testid"),
+        checked: element.getAttribute("aria-checked") === "true"
+      }));
+
+    if (!ResolutionControl.needsChange(readItems(), target)) {
+      return { applied: true, already: true, resolution: target };
+    }
+
+    const findOption = () => firstVisible(deepQuerySelectorAll(ResolutionControl.menuItemSelector(target)));
+
+    // The option is only clickable when the picker menu is open. After a reload
+    // it is usually closed, so open it via the Resolution trigger first.
+    let option = findOption();
+    if (!option) {
+      const trigger = findResolutionTrigger();
+      if (trigger) {
+        clickElement(trigger);
+        option = await waitFor(() => findOption(), 3000, 150);
+      }
+    }
+
+    if (!option) {
+      return { applied: false, reason: "control-not-found", target };
+    }
+
+    clickElement(option);
+
+    const confirmed = await waitFor(
+      () => (ResolutionControl.currentResolution(readItems()) === target ? true : null),
+      3000,
+      150
+    );
+
+    if (confirmed) {
+      console.log(`[Nuii AutoFly] Resolution set to ${target}.`);
+      return { applied: true, resolution: target };
+    }
+
+    return { applied: false, reason: "selection-not-confirmed", target };
+  }
+
+  // Locate the clickable control that opens the Resolution picker. Prefer the
+  // explicit Spectrum selectors; if those miss, anchor to a verified resolution
+  // menu item and walk up (across shadow boundaries) to its owning picker, which
+  // is more robust than guessing the trigger's attributes.
+  function findResolutionTrigger() {
+    const direct = firstVisible(
+      ResolutionControl.RESOLUTION_TRIGGER_SELECTORS.flatMap((selector) => deepQuerySelectorAll(selector))
+    );
+    if (direct) return direct;
+
+    const items = deepQuerySelectorAll(ResolutionControl.RESOLUTION_ITEM_SELECTOR);
+    for (const item of items) {
+      let node = item;
+      for (let depth = 0; depth < 12 && node; depth += 1) {
+        const parent = node.parentNode;
+        node = parent && parent.host ? parent.host : parent;
+        if (!node || !node.tagName) continue;
+        if (node.tagName === "SP-PICKER" || node.tagName === "SP-ACTION-BUTTON") return node;
+        if ((node.getAttribute && node.getAttribute("aria-haspopup")) && isVisible(node)) return node;
+      }
+    }
+
+    return null;
   }
 
   async function waitForExistingResult(prompt, settings) {
