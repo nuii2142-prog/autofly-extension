@@ -4,6 +4,17 @@
 
 Nuii Auto Bulk is a vanilla Manifest V3 Chrome extension for queue-based prompt automation on browser image generation tools.
 
+Key features and their notes live in `docs/superpowers/specs/`. Current major
+feature: single-ZIP download of all generated images (`zipDownload`), with a
+manual "Download ZIP" popup button and an `autoZipOnComplete` toggle. The
+content script intercepts Firefly's download click, fetches each full-res image,
+and stashes it in IndexedDB (`nuii-autofly` db) until the run ends. Per-prompt
+`zip:` and `res:` diagnostics are written into the exported run log — that
+exported JSON is the primary debugging channel for browser-only behaviour the
+unit tests cannot cover. Internal identifiers still use the legacy "autofly"
+token on purpose (storage key, IndexedDB name, content-ready guard) to avoid
+orphaning stored data.
+
 ## Hard Rules
 
 - Keep the extension loadable as an unpacked folder with no build step.
