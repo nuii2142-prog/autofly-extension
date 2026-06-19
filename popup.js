@@ -61,6 +61,7 @@ function bindElements() {
     "pause-btn",
     "stop-btn",
     "activity-list",
+    "download-zip-btn",
     "export-log"
   ].forEach((id) => {
     elements[toCamel(id)] = document.getElementById(id);
@@ -133,6 +134,7 @@ function bindUiEvents() {
   elements.startBtn.addEventListener("click", handleStartOrResume);
   elements.pauseBtn.addEventListener("click", () => sendMessage({ action: "PAUSE_PROCESSING" }));
   elements.stopBtn.addEventListener("click", () => sendMessage({ action: "STOP_PROCESSING" }));
+  elements.downloadZipBtn.addEventListener("click", handleDownloadZip);
   elements.exportLog.addEventListener("click", exportRunLog);
 
   chrome.runtime.onMessage.addListener((message) => {
@@ -314,6 +316,22 @@ async function handleStartOrResume() {
   }
 }
 
+async function handleDownloadZip() {
+  elements.downloadZipBtn.disabled = true;
+  try {
+    const response = await sendMessage({ action: "DOWNLOAD_ALL_ZIP" });
+    if (!response || response.success === false) {
+      renderNotice(`Could not build ZIP: ${(response && response.error) || "unknown error"}`);
+    } else if (!response.count) {
+      renderNotice('No captured images. Turn on "Combine into a single ZIP" before running.');
+    } else {
+      renderNotice(`Saved ${response.filename} (${response.count} image${response.count > 1 ? "s" : ""})`);
+    }
+  } finally {
+    elements.downloadZipBtn.disabled = false;
+  }
+}
+
 function collectPrompts() {
   return collectPromptEntries().map((entry) => entry.prompt);
 }
@@ -377,6 +395,7 @@ function renderState(state) {
   elements.startBtn.disabled = isRunning;
   elements.pauseBtn.disabled = !isRunning;
   elements.stopBtn.disabled = !isRunning && !isPaused;
+  elements.downloadZipBtn.disabled = isRunning;
 
   if (state.settings && state.settings.autoDelete && sourceMode === "paste" && document.activeElement !== elements.promptsTextarea) {
     const pending = (state.queue || [])

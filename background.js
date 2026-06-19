@@ -24,7 +24,8 @@ const CONTROL_ACTIONS = new Set([
   "START_PROCESSING",
   "PAUSE_PROCESSING",
   "RESUME_PROCESSING",
-  "STOP_PROCESSING"
+  "STOP_PROCESSING",
+  "DOWNLOAD_ALL_ZIP"
 ]);
 
 const DEFAULT_STATE = {
@@ -106,6 +107,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "STOP_PROCESSING") {
       stopProcessing();
       sendResponse({ success: true, state: publicState() });
+      return;
+    }
+
+    if (request.action === "DOWNLOAD_ALL_ZIP") {
+      const result = await finalizeRunZip({ manual: true });
+      sendResponse({ ...result, state: publicState() });
       return;
     }
 
@@ -268,7 +275,7 @@ async function processQueue() {
         if (response.warning) addLog(`Notice: ${response.warning}`);
         if (transition.warning) addLog(`Notice: ${transition.warning}`);
         if (response.diag) addWaitDiagnostics(response.diag);
-        if (appState.settings.autoDownload && response.downloads) {
+        if ((appState.settings.autoDownload || appState.settings.zipDownload) && response.downloads) {
           const verb = appState.settings.zipDownload ? "Captured" : "Downloaded";
           addLog(`${verb} ${response.downloads} image${response.downloads > 1 ? "s" : ""}`);
         }
@@ -325,23 +332,29 @@ async function processQueue() {
 
 // Pack every image captured this run into a single ZIP. The content script holds
 // the bytes (in IndexedDB on the firefly origin); the background only signals
-// when the run has ended. Idempotent so the queue-loop and the stop handler can
-// both call it without producing two archives.
-async function finalizeRunZip() {
-  if (appState.zipFinalized) return;
-  if (!(appState.settings.autoDownload && appState.settings.zipDownload)) return;
-  appState.zipFinalized = true;
+// when to build. The automatic path (queue end / stop) runs at most once per run
+// and only in ZIP mode; the manual "Download all as ZIP" button passes
+// { manual: true } to rebuild on demand regardless of those guards.
+async function finalizeRunZip(options) {
+  const manual = Boolean(options && options.manual);
+  if (!manual) {
+    if (appState.zipFinalized) return { success: true, skipped: true };
+    if (!appState.settings.zipDownload) return { success: true, skipped: true };
+    appState.zipFinalized = true;
+  }
 
-  const tabId = appState.targetTabId;
+  const tabId = await findFireflyTabId();
   if (!tabId) {
-    addLog("ZIP not built: no target tab available");
-    return;
+    const error = "open a Firefly tab to build the ZIP";
+    addLog(`ZIP not built: ${error}`);
+    return { success: false, error };
   }
 
   const ready = await ensureContentReady(tabId);
   if (!ready.success) {
-    addLog(`ZIP not built: ${ready.error || "content script unavailable"}`);
-    return;
+    const error = ready.error || "content script unavailable";
+    addLog(`ZIP not built: ${error}`);
+    return { success: false, error };
   }
 
   const response = await sendTabMessage(tabId, {
@@ -350,17 +363,34 @@ async function finalizeRunZip() {
   });
 
   if (!response || !response.success) {
-    addLog(`ZIP build failed: ${(response && response.error) || "unknown error"}`);
-    return;
+    const error = (response && response.error) || "unknown error";
+    addLog(`ZIP build failed: ${error}`);
+    return { success: false, error };
   }
 
   if (!response.count) {
     addLog("ZIP skipped: no images were captured this run");
-    return;
+    return { success: true, count: 0 };
   }
 
   addLog(`Saved ZIP: ${response.filename} (${response.count} image${response.count > 1 ? "s" : ""})`);
   await saveAndBroadcast();
+  return { success: true, count: response.count, filename: response.filename };
+}
+
+// Prefer this run's target tab, but fall back to any open Firefly tab so the
+// manual ZIP button still works after the run finished or the tab changed.
+async function findFireflyTabId() {
+  if (appState.targetTabId) {
+    const tab = await safeGetTab(appState.targetTabId);
+    if (tab && /firefly\.adobe\.com/i.test(tab.url || "")) return tab.id;
+  }
+  try {
+    const tabs = await chrome.tabs.query({ url: "https://firefly.adobe.com/*" });
+    return tabs && tabs.length ? tabs[0].id : null;
+  } catch (error) {
+    return null;
+  }
 }
 
 function nextQueueItem() {

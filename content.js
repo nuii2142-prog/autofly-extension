@@ -227,7 +227,9 @@
     // Lower bound 10s: the background sends the remaining run-timeout budget,
     // which can legitimately be under a minute on the final pass.
     const timeout = clamp(Number(settings.timeout) || 240, 10, 600) * 1000;
-    const autoDownload = Boolean(settings.autoDownload);
+    // ZIP mode captures images without writing each one to disk, so it pulls
+    // results even when the per-file Auto-download toggle is off.
+    const wantsDownload = Boolean(settings.autoDownload) || Boolean(settings.zipDownload);
     const startedAt = Date.now();
     const beforeState = settings.baselineState || generatePageState(prompt);
     const result = await waitForGeneration({
@@ -242,7 +244,7 @@
     // number of images this prompt produced so older batches still on the page
     // are not re-downloaded.
     let downloads = 0;
-    if (result.success && autoDownload) {
+    if (result.success && wantsDownload) {
       downloads = await clickDownloadButtons(result.newImageCount, settings);
     }
 
@@ -311,7 +313,7 @@
 
       if (settled.complete) {
         let downloads = 0;
-        if (settings.autoDownload) {
+        if (settings.autoDownload || settings.zipDownload) {
           // Scope History downloads to the outputs this prompt added.
           downloads = await clickDownloadButtons(state.outputCount - (beforeState.outputCount || 0), settings);
         }
@@ -933,7 +935,8 @@
     hookInstalled: false,
     active: false,
     runId: null,
-    pending: []
+    pending: [],
+    capturedHrefs: new Set()
   };
 
   function openZipDb() {
@@ -1026,6 +1029,7 @@
         await idbSetMeta("currentRunId", runId);
       }
       zipState.runId = runId;
+      zipState.capturedHrefs = new Set();
     }
   }
 
@@ -1065,6 +1069,8 @@
     // not hit disk, then stash its bytes for the run-end ZIP. Propagation is
     // left intact so Firefly's own click handlers still run normally.
     event.preventDefault();
+    if (zipState.capturedHrefs.has(href)) return; // already captured this image
+    zipState.capturedHrefs.add(href);
     zipState.pending.push(captureDownload(href, downloadName));
   }
 
@@ -1137,14 +1143,16 @@
     const blob = new Blob([zipBytes], { type: "application/zip" });
     const filename = `nuii-autofly-${zipTimestamp()}.zip`;
     triggerZipDownload(blob, filename);
-    await idbClearImages();
+    // Keep the captured images in IndexedDB so the "Download all as ZIP" button
+    // can rebuild the archive on demand; they are cleared when the next run
+    // starts (ensureZipRun) under a new runId.
 
     return { success: true, count: entries.length, filename };
   }
 
   async function clickDownloadButtons(limit, settings) {
     const opts = settings || {};
-    const zipMode = Boolean(opts.autoDownload && opts.zipDownload);
+    const zipMode = Boolean(opts.zipDownload);
     const DownloadButtons = globalThis.NuiiContentDownloads;
     // The newest batch is inserted at the top of the results feed, so ordering
     // download controls top-first and capping to this prompt's image count

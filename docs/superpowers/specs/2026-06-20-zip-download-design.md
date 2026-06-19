@@ -110,10 +110,24 @@ off-by-default option.
 
 ## Settings semantics
 
-- `zipMode = autoDownload && zipDownload`.
-- `zipMode` true → capture + suppress individual + finalize at run end.
+- `zipMode = zipDownload` (independent of `autoDownload`). Revised 2026-06-20
+  after testing showed users enable ZIP without Auto-download; coupling them
+  meant nothing was captured.
+- `zipDownload` true → capture + suppress per-file downloads + finalize at run end.
 - `autoDownload` true, `zipDownload` false → current per-file behaviour.
-- `autoDownload` false → no downloads (zipDownload ignored).
+- both false → no downloads.
+- Capture runs whenever `autoDownload || zipDownload`.
+
+## Manual "Download all as ZIP" button
+
+- A popup button (disabled while a run is active) sends `DOWNLOAD_ALL_ZIP` to the
+  background, which calls `finalizeRunZip({ manual: true })` — bypassing the
+  once-per-run guard and the zip-mode check so the user can rebuild on demand.
+- Captured images are therefore **kept** in IndexedDB after finalize (cleared
+  only when the next run starts under a new `runId`), so the button can rebuild
+  the archive repeatedly.
+- The background resolves the target via `findFireflyTabId()` (this run's tab, or
+  any open Firefly tab) so the button still works after the run ends.
 
 ## ZIP naming
 
