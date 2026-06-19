@@ -279,6 +279,9 @@ async function processQueue() {
           const verb = appState.settings.zipDownload ? "Captured" : "Downloaded";
           addLog(`${verb} ${response.downloads} image${response.downloads > 1 ? "s" : ""}`);
         }
+        if (appState.settings.zipDownload && response.downloadDiag) {
+          addLog(response.downloadDiag);
+        }
       } else if (transition.action === "retry") {
         addLog(`Retry ${item.attempts}/${appState.settings.retryLimit}: ${item.error}`);
       } else {

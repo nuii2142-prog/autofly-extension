@@ -261,6 +261,7 @@
       finalState: result.finalState || null,
       diag: result.diag || null,
       downloads,
+      downloadDiag: zipState.lastDiag,
       elapsedMs: Date.now() - startedAt,
       error: result.error || ""
     };
@@ -324,6 +325,7 @@
           stage: settled.stage,
           finalState: state,
           downloads,
+          downloadDiag: zipState.lastDiag,
           elapsedMs: Date.now() - startedAt,
           error: ""
         };
@@ -936,7 +938,10 @@
     active: false,
     runId: null,
     pending: [],
-    capturedHrefs: new Set()
+    capturedHrefs: new Set(),
+    lastDiag: "",
+    lastCaptureError: "",
+    intercepts: 0
   };
 
   function openZipDb() {
@@ -1069,6 +1074,7 @@
     // not hit disk, then stash its bytes for the run-end ZIP. Propagation is
     // left intact so Firefly's own click handlers still run normally.
     event.preventDefault();
+    zipState.intercepts += 1;
     if (zipState.capturedHrefs.has(href)) return; // already captured this image
     zipState.capturedHrefs.add(href);
     zipState.pending.push(captureDownload(href, downloadName));
@@ -1087,7 +1093,8 @@
       console.log(`[Nuii AutoFly] Captured image for ZIP: ${name} (${blob.size} bytes)`);
       return true;
     } catch (error) {
-      console.warn("[Nuii AutoFly] ZIP capture failed:", error && error.message);
+      zipState.lastCaptureError = (error && error.message) || "unknown";
+      console.warn("[Nuii AutoFly] ZIP capture failed:", zipState.lastCaptureError, href);
       return false;
     }
   }
@@ -1159,32 +1166,46 @@
     // targets the current batch and skips older batches still on the page.
     // An unknown count resolves to 0: better to skip than re-download old work.
     const max = DownloadButtons.resolveDownloadLimit(limit);
-    if (!max) return 0;
+    if (!max) {
+      zipState.lastDiag = `zip: skipped (limit=${limit})`;
+      return 0;
+    }
 
     zipState.active = zipMode;
     if (zipMode) {
       await ensureZipRun(opts.runId);
       installDownloadHook();
       zipState.pending = [];
+      zipState.intercepts = 0;
+      zipState.lastCaptureError = "";
     }
 
     await sleep(1200);
-    const buttons = DownloadButtons.filterDownloadCandidates(
-      deepQuerySelectorAll("button, [role='button'], a, sp-button")
-        .filter(isVisible)
-        .filter((element) => !isDisabled(element))
-        .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)
-        .map((element) => ({
-          element,
-          descriptor: {
-            label: elementLabel(element),
-            tagName: element.tagName,
-            hasDownloadAttr: Boolean(element.hasAttribute && element.hasAttribute("download")),
-            inNavigation: Boolean(element.closest && element.closest("nav, header, footer, [role='navigation'], [aria-label*='navigation' i]"))
-          }
-        })),
-      max
-    );
+    const scanned = deepQuerySelectorAll("button, [role='button'], a, sp-button")
+      .filter(isVisible)
+      .filter((element) => !isDisabled(element))
+      .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)
+      .map((element) => ({
+        element,
+        descriptor: {
+          label: elementLabel(element),
+          tagName: element.tagName,
+          hasDownloadAttr: Boolean(element.hasAttribute && element.hasAttribute("download")),
+          inNavigation: Boolean(element.closest && element.closest("nav, header, footer, [role='navigation'], [aria-label*='navigation' i]"))
+        }
+      }));
+    const buttons = DownloadButtons.filterDownloadCandidates(scanned, max);
+
+    let diagPrefix = "";
+    if (zipMode) {
+      // Surface what the download-control scan saw so a failed run is debuggable
+      // from the exported JSON log (labels are UI text, never prompt content).
+      const downloadish = scanned
+        .filter((candidate) => /download|save/i.test(candidate.descriptor.label || ""))
+        .slice(0, 6)
+        .map((candidate) => `${candidate.descriptor.tagName}:${truncate(candidate.descriptor.label || "", 24)}`);
+      diagPrefix = `zip: scanned=${scanned.length} downloadish=${downloadish.length} picked=${buttons.length} [${downloadish.join(" | ")}]`;
+    }
 
     for (const item of buttons) {
       clickElement(item.element);
@@ -1197,7 +1218,11 @@
       await sleep(2500);
       const results = await Promise.allSettled(zipState.pending);
       zipState.pending = [];
-      return results.filter((result) => result.status === "fulfilled" && result.value).length;
+      const captured = results.filter((result) => result.status === "fulfilled" && result.value).length;
+      const failed = results.length - captured;
+      zipState.lastDiag = `${diagPrefix} clicked=${buttons.length} intercepts=${zipState.intercepts} captured=${captured} failed=${failed}`
+        + (failed ? ` err=${truncate(zipState.lastCaptureError, 60)}` : "");
+      return captured;
     }
 
     return buttons.length;
