@@ -9,6 +9,8 @@
   const GenerationResult = globalThis.NuiiContentGeneration;
   const PromptControl = globalThis.NuiiContentPrompt;
   const ResolutionControl = globalThis.NuiiContentResolution;
+  const ZipWriter = globalThis.NuiiZipWriter;
+  const ZipCapture = globalThis.NuiiZipCapture;
 
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "PING") {
@@ -77,6 +79,13 @@
       target.scrollIntoView({ block: "center", inline: "nearest" });
       target.focus();
       sendResponse({ success: true });
+      return true;
+    }
+
+    if (request.action === "FINALIZE_ZIP") {
+      finalizeZip(request.runId)
+        .then(sendResponse)
+        .catch((error) => sendResponse({ success: false, error: error.message }));
       return true;
     }
 
@@ -234,7 +243,7 @@
     // are not re-downloaded.
     let downloads = 0;
     if (result.success && autoDownload) {
-      downloads = await clickDownloadButtons(result.newImageCount);
+      downloads = await clickDownloadButtons(result.newImageCount, settings);
     }
 
     if (result.success) {
@@ -304,7 +313,7 @@
         let downloads = 0;
         if (settings.autoDownload) {
           // Scope History downloads to the outputs this prompt added.
-          downloads = await clickDownloadButtons(state.outputCount - (beforeState.outputCount || 0));
+          downloads = await clickDownloadButtons(state.outputCount - (beforeState.outputCount || 0), settings);
         }
 
         return {
@@ -909,7 +918,233 @@
     return message ? truncate(message, 160) : "";
   }
 
-  async function clickDownloadButtons(limit) {
+  // --- Single-ZIP capture -------------------------------------------------
+  // When ZIP mode is on, Firefly's own download button is still clicked, but a
+  // capture-phase click hook diverts the resulting <a download> so the image
+  // bytes are fetched and stashed in IndexedDB (which survives the long-run tab
+  // refresh) instead of saving each file to disk. At run end the background
+  // sends FINALIZE_ZIP and these are packed into one archive.
+  const ZIP_DB_NAME = "nuii-autofly";
+  const ZIP_DB_VERSION = 1;
+  const ZIP_IMAGES_STORE = "images";
+  const ZIP_META_STORE = "meta";
+
+  const zipState = {
+    hookInstalled: false,
+    active: false,
+    runId: null,
+    pending: []
+  };
+
+  function openZipDb() {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open(ZIP_DB_NAME, ZIP_DB_VERSION);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains(ZIP_IMAGES_STORE)) {
+          const store = db.createObjectStore(ZIP_IMAGES_STORE, { keyPath: "id", autoIncrement: true });
+          store.createIndex("runId", "runId", { unique: false });
+        }
+        if (!db.objectStoreNames.contains(ZIP_META_STORE)) {
+          db.createObjectStore(ZIP_META_STORE, { keyPath: "key" });
+        }
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error || new Error("IndexedDB open failed"));
+    });
+  }
+
+  function idbRequest(req) {
+    return new Promise((resolve, reject) => {
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error || new Error("IndexedDB request failed"));
+    });
+  }
+
+  async function idbGetMeta(key) {
+    const db = await openZipDb();
+    try {
+      const tx = db.transaction(ZIP_META_STORE, "readonly");
+      const record = await idbRequest(tx.objectStore(ZIP_META_STORE).get(key));
+      return record ? record.value : null;
+    } finally {
+      db.close();
+    }
+  }
+
+  async function idbSetMeta(key, value) {
+    const db = await openZipDb();
+    try {
+      const tx = db.transaction(ZIP_META_STORE, "readwrite");
+      await idbRequest(tx.objectStore(ZIP_META_STORE).put({ key, value }));
+    } finally {
+      db.close();
+    }
+  }
+
+  async function idbClearImages() {
+    const db = await openZipDb();
+    try {
+      const tx = db.transaction(ZIP_IMAGES_STORE, "readwrite");
+      await idbRequest(tx.objectStore(ZIP_IMAGES_STORE).clear());
+    } finally {
+      db.close();
+    }
+  }
+
+  async function idbPutImage(record) {
+    const db = await openZipDb();
+    try {
+      const tx = db.transaction(ZIP_IMAGES_STORE, "readwrite");
+      await idbRequest(tx.objectStore(ZIP_IMAGES_STORE).add(record));
+    } finally {
+      db.close();
+    }
+  }
+
+  async function idbGetImagesByRun(runId) {
+    const db = await openZipDb();
+    try {
+      const tx = db.transaction(ZIP_IMAGES_STORE, "readonly");
+      const index = tx.objectStore(ZIP_IMAGES_STORE).index("runId");
+      const records = await idbRequest(index.getAll(runId));
+      return records || [];
+    } finally {
+      db.close();
+    }
+  }
+
+  // Start (or continue) a run's capture set. A changed runId clears any leftover
+  // images from a prior run. The marker lives in IndexedDB, not memory, so the
+  // mid-run tab refresh (which re-injects this script) does not wipe the run.
+  async function ensureZipRun(runId) {
+    if (!runId) return;
+    if (zipState.runId !== runId) {
+      const stored = await idbGetMeta("currentRunId");
+      if (stored !== runId) {
+        await idbClearImages();
+        await idbSetMeta("currentRunId", runId);
+      }
+      zipState.runId = runId;
+    }
+  }
+
+  function anchorFromEvent(event) {
+    const path = typeof event.composedPath === "function" ? event.composedPath() : [];
+    for (const node of path) {
+      if (node && node.tagName === "A") return node;
+    }
+    return event.target && event.target.closest ? event.target.closest("a") : null;
+  }
+
+  function isCapturableAnchor(anchor) {
+    if (!anchor) return false;
+    if (anchor.hasAttribute("data-nuii-zip")) return false; // our own ZIP download
+    const href = anchor.getAttribute("href") || anchor.href || "";
+    if (!href || /^javascript:/i.test(href)) return false;
+    const hasDownload = anchor.hasAttribute("download");
+    const looksDownloadable = /^(blob:|data:|https?:)/i.test(href);
+    return hasDownload || looksDownloadable;
+  }
+
+  function installDownloadHook() {
+    if (zipState.hookInstalled) return;
+    document.addEventListener("click", onDownloadClickCapture, true);
+    zipState.hookInstalled = true;
+  }
+
+  function onDownloadClickCapture(event) {
+    if (!zipState.active) return;
+    const anchor = anchorFromEvent(event);
+    if (!isCapturableAnchor(anchor)) return;
+
+    const href = anchor.href || anchor.getAttribute("href");
+    const downloadName = anchor.getAttribute("download") || "";
+
+    // Divert Firefly's own download: cancel the default action so the file does
+    // not hit disk, then stash its bytes for the run-end ZIP. Propagation is
+    // left intact so Firefly's own click handlers still run normally.
+    event.preventDefault();
+    zipState.pending.push(captureDownload(href, downloadName));
+  }
+
+  async function captureDownload(href, downloadName) {
+    try {
+      const runId = zipState.runId;
+      if (!runId) return false;
+      const response = await fetch(href, { credentials: "include" });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const blob = await response.blob();
+      const type = blob.type || "";
+      const name = ZipCapture.sanitizeEntryName(downloadName, "image" + ZipCapture.extensionFromMime(type));
+      await idbPutImage({ runId, name, type, blob });
+      console.log(`[Nuii AutoFly] Captured image for ZIP: ${name} (${blob.size} bytes)`);
+      return true;
+    } catch (error) {
+      console.warn("[Nuii AutoFly] ZIP capture failed:", error && error.message);
+      return false;
+    }
+  }
+
+  function zipTimestamp() {
+    const now = new Date();
+    const pad = (value) => String(value).padStart(2, "0");
+    return (
+      `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}` +
+      `-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
+    );
+  }
+
+  function triggerZipDownload(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.setAttribute("data-nuii-zip", "1");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.style.display = "none";
+    document.body.appendChild(anchor);
+    anchor.click();
+    setTimeout(() => {
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    }, 4000);
+  }
+
+  async function finalizeZip(runId) {
+    zipState.active = false;
+    const targetRun = runId || zipState.runId;
+    const records = await idbGetImagesByRun(targetRun);
+    if (!records.length) {
+      return { success: true, count: 0 };
+    }
+
+    const names = ZipCapture.dedupeEntryNames(
+      records.map((record, index) =>
+        ZipCapture.sanitizeEntryName(
+          record.name,
+          `image-${String(index + 1).padStart(3, "0")}${ZipCapture.extensionFromMime(record.type)}`
+        )
+      )
+    );
+
+    const entries = [];
+    for (let i = 0; i < records.length; i += 1) {
+      const buffer = await records[i].blob.arrayBuffer();
+      entries.push({ name: names[i], data: new Uint8Array(buffer) });
+    }
+
+    const zipBytes = ZipWriter.buildZip(entries);
+    const blob = new Blob([zipBytes], { type: "application/zip" });
+    const filename = `nuii-autofly-${zipTimestamp()}.zip`;
+    triggerZipDownload(blob, filename);
+    await idbClearImages();
+
+    return { success: true, count: entries.length, filename };
+  }
+
+  async function clickDownloadButtons(limit, settings) {
+    const opts = settings || {};
+    const zipMode = Boolean(opts.autoDownload && opts.zipDownload);
     const DownloadButtons = globalThis.NuiiContentDownloads;
     // The newest batch is inserted at the top of the results feed, so ordering
     // download controls top-first and capping to this prompt's image count
@@ -917,6 +1152,13 @@
     // An unknown count resolves to 0: better to skip than re-download old work.
     const max = DownloadButtons.resolveDownloadLimit(limit);
     if (!max) return 0;
+
+    zipState.active = zipMode;
+    if (zipMode) {
+      await ensureZipRun(opts.runId);
+      installDownloadHook();
+      zipState.pending = [];
+    }
 
     await sleep(1200);
     const buttons = DownloadButtons.filterDownloadCandidates(
@@ -939,6 +1181,15 @@
     for (const item of buttons) {
       clickElement(item.element);
       await sleep(450);
+    }
+
+    if (zipMode) {
+      // Give Firefly time to create and click its download anchors so the hook
+      // can intercept them, then wait for every fetch + IndexedDB write.
+      await sleep(2500);
+      const results = await Promise.allSettled(zipState.pending);
+      zipState.pending = [];
+      return results.filter((result) => result.status === "fulfilled" && result.value).length;
     }
 
     return buttons.length;

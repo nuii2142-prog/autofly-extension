@@ -33,6 +33,13 @@ test("sanitizeSettings clamps numeric controls and preserves booleans", () => {
   assert.equal(settings.stayOnGenerate, false);
 });
 
+test("sanitizeSettings defaults zipDownload off and coerces it to a boolean", () => {
+  assert.equal(sanitizeSettings({}).zipDownload, false);
+  assert.equal(sanitizeSettings({ zipDownload: 1 }).zipDownload, true);
+  assert.equal(sanitizeSettings({ zipDownload: true }).zipDownload, true);
+  assert.equal(sanitizeSettings({ zipDownload: 0 }).zipDownload, false);
+});
+
 test("sanitizeSettings defaults resolution to 2K and only accepts known values", () => {
   assert.equal(sanitizeSettings({}).resolution, "2K");
   assert.equal(sanitizeSettings({ resolution: "1K" }).resolution, "1K");

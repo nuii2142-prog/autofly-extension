@@ -39,6 +39,7 @@ const DEFAULT_STATE = {
   waitingForResult: false,
   promptsSinceRefresh: 0,
   runId: null,
+  zipFinalized: false,
   startedAt: null,
   finishedAt: null,
   lastError: "",
@@ -209,6 +210,11 @@ function stopProcessing() {
   stopWorkerKeepAlive();
   addLog("Stopped queue");
   saveAndBroadcast();
+  // If a loop is still running it will finalize the ZIP after the in-flight
+  // prompt settles; only finalize here when stopping from a paused (idle) state.
+  if (!queueLoopRunning) {
+    finalizeRunZip().catch((error) => addLog(`ZIP build failed: ${error.message}`));
+  }
 }
 
 async function processQueue() {
@@ -263,7 +269,8 @@ async function processQueue() {
         if (transition.warning) addLog(`Notice: ${transition.warning}`);
         if (response.diag) addWaitDiagnostics(response.diag);
         if (appState.settings.autoDownload && response.downloads) {
-          addLog(`Downloaded ${response.downloads} image${response.downloads > 1 ? "s" : ""}`);
+          const verb = appState.settings.zipDownload ? "Captured" : "Downloaded";
+          addLog(`${verb} ${response.downloads} image${response.downloads > 1 ? "s" : ""}`);
         }
       } else if (transition.action === "retry") {
         addLog(`Retry ${item.attempts}/${appState.settings.retryLimit}: ${item.error}`);
@@ -303,11 +310,57 @@ async function processQueue() {
     await saveAndBroadcast();
     await playCompletionSound("error");
   } finally {
+    const terminal = appState.status === "Complete"
+      || appState.status === "Stopped"
+      || appState.status === "Error";
+    if (terminal) {
+      await finalizeRunZip();
+    }
     queueLoopRunning = false;
     if (appState.status !== "Running") {
       stopWorkerKeepAlive();
     }
   }
+}
+
+// Pack every image captured this run into a single ZIP. The content script holds
+// the bytes (in IndexedDB on the firefly origin); the background only signals
+// when the run has ended. Idempotent so the queue-loop and the stop handler can
+// both call it without producing two archives.
+async function finalizeRunZip() {
+  if (appState.zipFinalized) return;
+  if (!(appState.settings.autoDownload && appState.settings.zipDownload)) return;
+  appState.zipFinalized = true;
+
+  const tabId = appState.targetTabId;
+  if (!tabId) {
+    addLog("ZIP not built: no target tab available");
+    return;
+  }
+
+  const ready = await ensureContentReady(tabId);
+  if (!ready.success) {
+    addLog(`ZIP not built: ${ready.error || "content script unavailable"}`);
+    return;
+  }
+
+  const response = await sendTabMessage(tabId, {
+    action: "FINALIZE_ZIP",
+    runId: appState.runId
+  });
+
+  if (!response || !response.success) {
+    addLog(`ZIP build failed: ${(response && response.error) || "unknown error"}`);
+    return;
+  }
+
+  if (!response.count) {
+    addLog("ZIP skipped: no images were captured this run");
+    return;
+  }
+
+  addLog(`Saved ZIP: ${response.filename} (${response.count} image${response.count > 1 ? "s" : ""})`);
+  await saveAndBroadcast();
 }
 
 function nextQueueItem() {
@@ -354,6 +407,8 @@ async function runPrompt(item) {
     settings: {
       timeout: appState.settings.timeout,
       autoDownload: appState.settings.autoDownload,
+      zipDownload: appState.settings.zipDownload,
+      runId: appState.runId,
       platform: appState.settings.platform,
       resolution: appState.settings.resolution
     }
@@ -681,6 +736,8 @@ async function waitForSubmittedPrompt(tabId, prompt, submittedAt, baselineState)
       settings: {
         timeout: remainingSeconds,
         autoDownload: appState.settings.autoDownload,
+        zipDownload: appState.settings.zipDownload,
+        runId: appState.runId,
         platform: appState.settings.platform,
         baselineState
       }
@@ -868,10 +925,13 @@ async function ensureContentReady(tabId) {
         "src/shared/text.js",
         "src/shared/message.js",
         "src/content/firefly-selectors.js",
+        "src/content/resolution-control.js",
         "src/content/generation-result.js",
         "src/content/history-result.js",
         "src/content/prompt-control.js",
         "src/content/download-buttons.js",
+        "src/shared/zip-writer.js",
+        "src/content/zip-capture.js",
         "content.js"
       ]
     });

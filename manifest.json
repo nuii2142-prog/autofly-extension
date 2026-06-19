@@ -22,6 +22,8 @@
         "src/content/history-result.js",
         "src/content/prompt-control.js",
         "src/content/download-buttons.js",
+        "src/shared/zip-writer.js",
+        "src/content/zip-capture.js",
         "content.js"
       ],
       "run_at": "document_idle"
