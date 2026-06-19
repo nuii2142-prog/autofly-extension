@@ -118,7 +118,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     sendResponse({ success: false, error: "Unknown action" });
   })().catch((error) => {
-    console.error("[Nuii AutoFly] Message error:", error);
+    console.error("[Nuii Auto Bulk] Message error:", error);
     sendResponse({ success: false, error: error.message });
   });
 

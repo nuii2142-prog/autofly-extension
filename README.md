@@ -1,4 +1,4 @@
-# Nuii AutoFly Studio
+# Nuii Auto Bulk
 
 Original Chrome extension for bulk prompt automation on browser-based AI image tools. This project does not include third-party extension code, branding assets, or platform APIs.
 

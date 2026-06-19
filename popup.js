@@ -453,7 +453,7 @@ function exportRunLog() {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = `nuii-autofly-log-${Date.now()}.json`;
+  anchor.download = `nuii-auto-bulk-log-${Date.now()}.json`;
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
@@ -578,7 +578,7 @@ function storageSet(items) {
       if (chrome.runtime.lastError) {
         // Draft persistence is best-effort (e.g. a too-large imported file);
         // surface it in the console instead of failing silently.
-        console.warn("[Nuii AutoFly] Draft not saved:", chrome.runtime.lastError.message);
+        console.warn("[Nuii Auto Bulk] Draft not saved:", chrome.runtime.lastError.message);
       }
       resolve();
     });

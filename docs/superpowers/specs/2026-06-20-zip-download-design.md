@@ -131,7 +131,7 @@ off-by-default option.
 
 ## ZIP naming
 
-- Archive: `nuii-autofly-<YYYYMMDD-HHMMSS>.zip`.
+- Archive: `nuii-auto-bulk-<YYYYMMDD-HHMMSS>.zip`.
 - Entries: the anchor `download` filename when present, else
   `image-001.<ext>`…; collisions disambiguated by `dedupeEntryNames`.
 

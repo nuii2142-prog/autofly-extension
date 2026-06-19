@@ -2,7 +2,7 @@
 
 ## Project
 
-Nuii AutoFly Studio is a vanilla Manifest V3 Chrome extension for queue-based prompt automation on browser image generation tools.
+Nuii Auto Bulk is a vanilla Manifest V3 Chrome extension for queue-based prompt automation on browser image generation tools.
 
 ## Hard Rules
 

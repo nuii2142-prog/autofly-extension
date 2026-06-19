@@ -1,11 +1,11 @@
 {
   "manifest_version": 3,
-  "name": "Nuii AutoFly Studio",
+  "name": "Nuii Auto Bulk",
   "version": "1.6.0",
   "description": "Bulk prompt automation for AI image generation workflows in the browser.",
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Nuii AutoFly Studio"
+    "default_title": "Nuii Auto Bulk"
   },
   "background": {
     "service_worker": "background.js"

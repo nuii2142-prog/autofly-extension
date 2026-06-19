@@ -4,7 +4,7 @@
   }
 
   globalThis.__NUII_AUTOFLY_CONTENT_READY__ = true;
-  console.log("[Nuii AutoFly] Content automation ready.");
+  console.log("[Nuii Auto Bulk] Content automation ready.");
   const FireflySelectors = globalThis.NuiiContentSelectors;
   const GenerationResult = globalThis.NuiiContentGeneration;
   const PromptControl = globalThis.NuiiContentPrompt;
@@ -232,7 +232,7 @@
 
     if (confirmed) {
       lastResolutionDiag = `res: set ${target} (attempt ${attempts}) [${describe()}]`;
-      console.log(`[Nuii AutoFly] Resolution set to ${target}.`);
+      console.log(`[Nuii Auto Bulk] Resolution set to ${target}.`);
       return { applied: true, resolution: target };
     }
 
@@ -1132,11 +1132,11 @@
       const type = blob.type || "";
       const name = ZipCapture.sanitizeEntryName(downloadName, "image" + ZipCapture.extensionFromMime(type));
       await idbPutImage({ runId, name, type, blob });
-      console.log(`[Nuii AutoFly] Captured image for ZIP: ${name} (${blob.size} bytes)`);
+      console.log(`[Nuii Auto Bulk] Captured image for ZIP: ${name} (${blob.size} bytes)`);
       return true;
     } catch (error) {
       zipState.lastCaptureError = (error && error.message) || "unknown";
-      console.warn("[Nuii AutoFly] ZIP capture failed:", zipState.lastCaptureError, href);
+      console.warn("[Nuii Auto Bulk] ZIP capture failed:", zipState.lastCaptureError, href);
       return false;
     }
   }
@@ -1190,7 +1190,7 @@
 
     const zipBytes = ZipWriter.buildZip(entries);
     const blob = new Blob([zipBytes], { type: "application/zip" });
-    const filename = `nuii-autofly-${zipTimestamp()}.zip`;
+    const filename = `nuii-auto-bulk-${zipTimestamp()}.zip`;
     triggerZipDownload(blob, filename);
     // Keep the captured images in IndexedDB so the "Download all as ZIP" button
     // can rebuild the archive on demand; they are cleared when the next run
