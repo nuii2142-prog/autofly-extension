@@ -51,6 +51,7 @@ function bindElements() {
     "resolution-select",
     "auto-download",
     "zip-download",
+    "auto-zip",
     "auto-delete",
     "continue-on-error",
     "sound-on-complete",
@@ -124,6 +125,7 @@ function bindUiEvents() {
     "resolutionSelect",
     "autoDownload",
     "zipDownload",
+    "autoZip",
     "autoDelete",
     "continueOnError",
     "soundOnComplete"
@@ -160,6 +162,7 @@ async function loadDraft() {
   elements.resolutionSelect.value = settings.resolution;
   elements.autoDownload.checked = Boolean(settings.autoDownload);
   elements.zipDownload.checked = Boolean(settings.zipDownload);
+  elements.autoZip.checked = settings.autoZipOnComplete !== false;
   elements.autoDelete.checked = Boolean(settings.autoDelete);
   elements.continueOnError.checked = Boolean(settings.continueOnError);
   elements.soundOnComplete.checked = settings.soundOnComplete !== false;
@@ -353,6 +356,7 @@ function readSettings() {
     retryLimit: Number(elements.retryLimit.value),
     autoDownload: elements.autoDownload.checked,
     zipDownload: elements.zipDownload.checked,
+    autoZipOnComplete: elements.autoZip.checked,
     autoDelete: elements.autoDelete.checked,
     continueOnError: elements.continueOnError.checked,
     platform: elements.platformMode.value,

@@ -35,6 +35,45 @@ test("currentResolution returns the checked option, or null when none is checked
   assert.equal(Resolution.currentResolution(undefined), null);
 });
 
+test("normalizeResolution strips the testid prefix and uppercases", () => {
+  assert.equal(Resolution.normalizeResolution("2K"), "2K");
+  assert.equal(Resolution.normalizeResolution("firefly-menu-item-2K"), "2K");
+  assert.equal(Resolution.normalizeResolution("firefly-menu-item-1k"), "1K");
+  assert.equal(Resolution.normalizeResolution(" 2k "), "2K");
+  assert.equal(Resolution.normalizeResolution(undefined), "");
+});
+
+test("currentResolution normalizes a testid-only value (Firefly Image 5 shape)", () => {
+  assert.equal(
+    Resolution.currentResolution([
+      { value: "firefly-menu-item-1K", checked: false },
+      { value: "firefly-menu-item-2K", checked: true }
+    ]),
+    "2K"
+  );
+});
+
+test("needsChange handles testid-only values without a value attribute", () => {
+  // The bug: a menu item exposes only data-testid, so the raw value is
+  // "firefly-menu-item-2K". It must still compare equal to the "2K" target.
+  assert.equal(
+    Resolution.needsChange([{ value: "firefly-menu-item-2K", checked: true }], "2K"),
+    false
+  );
+  assert.equal(
+    Resolution.needsChange([{ value: "firefly-menu-item-1K", checked: true }], "2K"),
+    true
+  );
+});
+
+test("itemMatchesResolution matches on value, label, or testid", () => {
+  assert.equal(Resolution.itemMatchesResolution({ value: "2K" }, "2K"), true);
+  assert.equal(Resolution.itemMatchesResolution({ label: "2K" }, "2K"), true);
+  assert.equal(Resolution.itemMatchesResolution({ testid: "firefly-menu-item-2K" }, "2K"), true);
+  assert.equal(Resolution.itemMatchesResolution({ value: "1K" }, "2K"), false);
+  assert.equal(Resolution.itemMatchesResolution(null, "2K"), false);
+});
+
 test("needsChange is true only when a supported target differs from the selection", () => {
   // Reload default is 1K — the bug condition: user wants 2K, page shows 1K.
   assert.equal(

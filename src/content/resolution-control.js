@@ -17,8 +17,21 @@
     'button[aria-label="Resolution"]'
   ];
 
+  // Reduce any raw selection signal to a comparable token. The DOM exposes the
+  // value in several shapes depending on the model UI: a "value" attribute
+  // ("2K"), the testid fallback ("firefly-menu-item-2K"), or the visible label
+  // ("2K"). Normalizing strips the testid prefix and uppercases so all three
+  // compare equal. Without this, a model whose menu item lacks a value attribute
+  // (e.g. Firefly Image 5) never confirms and silently stays at 1K.
+  function normalizeResolution(value) {
+    return String(value == null ? "" : value)
+      .trim()
+      .replace(/^firefly-menu-item-/i, "")
+      .toUpperCase();
+  }
+
   function isSupportedResolution(value) {
-    return RESOLUTION_VALUES.includes(value);
+    return RESOLUTION_VALUES.includes(normalizeResolution(value));
   }
 
   function menuItemTestId(value) {
@@ -29,17 +42,26 @@
     return `[data-testid="${menuItemTestId(value)}"]`;
   }
 
-  // items: [{ value, checked }] read from the DOM radios. Returns the value of
-  // the currently selected option, or null when nothing is checked yet.
+  // items: [{ value, checked }] read from the DOM radios. Returns the normalized
+  // value of the currently selected option, or null when nothing is checked yet.
   function currentResolution(items) {
     const checked = (items || []).find((item) => item && item.checked);
-    return checked ? checked.value : null;
+    return checked ? normalizeResolution(checked.value) : null;
+  }
+
+  // True if an item's value/label/testid resolves to the target resolution.
+  function itemMatchesResolution(item, target) {
+    if (!item) return false;
+    const wanted = normalizeResolution(target);
+    return [item.value, item.label, item.testid].some(
+      (candidate) => candidate != null && normalizeResolution(candidate) === wanted
+    );
   }
 
   // True only when the target is supported AND differs from what is selected.
   function needsChange(items, target) {
     if (!isSupportedResolution(target)) return false;
-    return currentResolution(items) !== target;
+    return currentResolution(items) !== normalizeResolution(target);
   }
 
   const api = {
@@ -48,9 +70,11 @@
     RESOLUTION_ITEM_SELECTOR,
     RESOLUTION_TRIGGER_SELECTORS,
     isSupportedResolution,
+    normalizeResolution,
     menuItemTestId,
     menuItemSelector,
     currentResolution,
+    itemMatchesResolution,
     needsChange
   };
 

@@ -344,6 +344,14 @@ async function finalizeRunZip(options) {
     if (appState.zipFinalized) return { success: true, skipped: true };
     if (!appState.settings.zipDownload) return { success: true, skipped: true };
     appState.zipFinalized = true;
+    // Manual mode: capture during the run but let the user trigger the save
+    // (so a download never interrupts a game / fullscreen app). The completion
+    // sound still plays; the popup "Download ZIP" button builds it on demand.
+    if (!appState.settings.autoZipOnComplete) {
+      addLog("ZIP ready — click Download ZIP in the popup to save the archive");
+      await saveAndBroadcast();
+      return { success: true, skipped: true };
+    }
   }
 
   const tabId = await findFireflyTabId();
@@ -446,6 +454,10 @@ async function runPrompt(item) {
       resolution: appState.settings.resolution
     }
   });
+
+  if (submitResponse.resolutionDiag) {
+    addLog(submitResponse.resolutionDiag);
+  }
 
   let assumedSubmitted = false;
   if (!submitResponse.success) {

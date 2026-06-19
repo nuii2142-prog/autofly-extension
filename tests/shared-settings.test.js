@@ -40,6 +40,13 @@ test("sanitizeSettings defaults zipDownload off and coerces it to a boolean", ()
   assert.equal(sanitizeSettings({ zipDownload: 0 }).zipDownload, false);
 });
 
+test("sanitizeSettings defaults autoZipOnComplete on and only false disables it", () => {
+  assert.equal(sanitizeSettings({}).autoZipOnComplete, true);
+  assert.equal(sanitizeSettings({ autoZipOnComplete: false }).autoZipOnComplete, false);
+  assert.equal(sanitizeSettings({ autoZipOnComplete: true }).autoZipOnComplete, true);
+  assert.equal(sanitizeSettings({ autoZipOnComplete: 1 }).autoZipOnComplete, true);
+});
+
 test("sanitizeSettings defaults resolution to 2K and only accepts known values", () => {
   assert.equal(sanitizeSettings({}).resolution, "2K");
   assert.equal(sanitizeSettings({ resolution: "1K" }).resolution, "1K");

@@ -139,6 +139,7 @@
       generateButtons: buttonCandidates,
       state: generatePageState(prompt),
       resolution,
+      resolutionDiag: lastResolutionDiag,
       elapsedMs: Date.now() - startedAt,
       error: ""
     };
@@ -150,51 +151,92 @@
   // only reliable path is to drive the Spectrum menu the same way a user would.
   // A failure here never blocks the run: it returns a reason and we generate at
   // whatever resolution the page currently holds.
+  let lastResolutionDiag = "";
+
   async function applyResolution(target) {
     if (!ResolutionControl || !ResolutionControl.isSupportedResolution(target)) {
+      lastResolutionDiag = `res: unsupported target=${target || "?"}`;
       return { applied: false, reason: "unsupported", target: target || null };
     }
 
     const readItems = () =>
       deepQuerySelectorAll(ResolutionControl.RESOLUTION_ITEM_SELECTOR).map((element) => ({
         value: element.getAttribute("value") || element.getAttribute("data-testid"),
+        testid: element.getAttribute("data-testid"),
+        label: (element.textContent || "").trim(),
         checked: element.getAttribute("aria-checked") === "true"
       }));
 
+    // Compact summary of the picker's options (normalized; "*" marks checked)
+    // so a misbehaving model UI is debuggable from the exported run log.
+    const describe = () =>
+      readItems()
+        .slice(0, 8)
+        .map((item) => `${ResolutionControl.normalizeResolution(item.value || item.testid)}${item.checked ? "*" : ""}`)
+        .join(",");
+
     if (!ResolutionControl.needsChange(readItems(), target)) {
+      lastResolutionDiag = `res: already ${target} [${describe()}]`;
       return { applied: true, already: true, resolution: target };
     }
 
-    const findOption = () => firstVisible(deepQuerySelectorAll(ResolutionControl.menuItemSelector(target)));
+    // Match the option by value, visible label, or testid (tolerant) rather than
+    // a single strict testid selector, so a model whose menu item lacks a value
+    // attribute still resolves correctly.
+    const findOption = () =>
+      deepQuerySelectorAll(ResolutionControl.RESOLUTION_ITEM_SELECTOR)
+        .filter(isVisible)
+        .find((element) =>
+          ResolutionControl.itemMatchesResolution(
+            {
+              value: element.getAttribute("value") || element.getAttribute("data-testid"),
+              testid: element.getAttribute("data-testid"),
+              label: (element.textContent || "").trim()
+            },
+            target
+          )
+        ) || null;
 
-    // The option is only clickable when the picker menu is open. After a reload
-    // it is usually closed, so open it via the Resolution trigger first.
-    let option = findOption();
-    if (!option) {
-      const trigger = findResolutionTrigger();
-      if (trigger) {
-        clickElement(trigger);
-        option = await waitFor(() => findOption(), 3000, 150);
+    let confirmed = false;
+    let attempts = 0;
+    while (!confirmed && attempts < 3) {
+      attempts += 1;
+
+      // The option is only clickable when the picker menu is open. After a reload
+      // it is usually closed, so open it via the Resolution trigger first.
+      let option = findOption();
+      if (!option) {
+        const trigger = findResolutionTrigger();
+        if (trigger) {
+          clickElement(trigger);
+          option = await waitFor(() => findOption(), 3000, 150);
+        }
       }
+
+      if (!option) {
+        lastResolutionDiag = `res: control-not-found target=${target} attempt=${attempts} [${describe()}]`;
+        await sleep(400);
+        continue;
+      }
+
+      clickElement(option);
+      confirmed = await waitFor(
+        () =>
+          ResolutionControl.currentResolution(readItems()) === ResolutionControl.normalizeResolution(target)
+            ? true
+            : null,
+        3000,
+        150
+      );
     }
-
-    if (!option) {
-      return { applied: false, reason: "control-not-found", target };
-    }
-
-    clickElement(option);
-
-    const confirmed = await waitFor(
-      () => (ResolutionControl.currentResolution(readItems()) === target ? true : null),
-      3000,
-      150
-    );
 
     if (confirmed) {
+      lastResolutionDiag = `res: set ${target} (attempt ${attempts}) [${describe()}]`;
       console.log(`[Nuii AutoFly] Resolution set to ${target}.`);
       return { applied: true, resolution: target };
     }
 
+    lastResolutionDiag = `res: NOT-confirmed target=${target} attempts=${attempts} [${describe()}]`;
     return { applied: false, reason: "selection-not-confirmed", target };
   }
 

@@ -158,6 +158,33 @@ off-by-default option.
   project's existing pattern of testing extracted pure helpers only).
 - `npm run check` (syntax) and `npm test` (unit) must pass.
 
+## Implementation status (2026-06-20)
+
+**Working (confirmed against live Firefly):**
+- ZIP capture + single-archive download. Logs show `intercepts=N captured=N
+  failed=0` and `Saved ZIP: ...`. Firefly's download control is an
+  `SP-ACTION-BUTTON` labelled "Download"; the capture-phase click hook + same-
+  origin/blob fetch works without extra permissions.
+- Decoupled from Auto-download; manual "Download ZIP" button; `autoZipOnComplete`
+  toggle (default on → auto-download at run end; off → sound only, user clicks
+  the button).
+- Per-prompt diagnostics in the exported run log: `zip: scanned=.. downloadish=..
+  picked=.. clicked=.. intercepts=.. captured=.. failed=..` and `res: ...`.
+
+**Fixed, needs live re-confirmation:**
+- Resolution stuck at 1K on **Firefly Image 5**: matching now normalizes the
+  value/testid/label (`firefly-menu-item-2K` → `2K`), retries up to 3×, and logs
+  a `res:` diagnostic. The likely cause was the menu item exposing only a
+  `data-testid` (no `value` attribute), so the old strict `=== "2K"` compare
+  never confirmed. Confirm via the `res: set 2K ...` log on the next Image 5 run.
+
+**Known / open:**
+- On Firefly Image 5 the per-prompt capture saw `newImages 1` (only 1 of 4
+  images captured), while Image 4 saw 4. The download limit comes from
+  `newImageCount`; Image 5's result UI differs. Revisit if the user needs all 4
+  per prompt on Image 5 — the new `res:`/`zip:` diagnostics will show the DOM
+  shape to base a fix on. One image at a time, verify before piling on changes.
+
 ## Out of scope (YAGNI)
 
 - DEFLATE compression (STORE is sufficient for already-compressed images).
