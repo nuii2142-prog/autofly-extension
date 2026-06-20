@@ -827,6 +827,19 @@ async function playCompletionSound(tone) {
   if (!appState.settings.soundOnComplete) return;
   if (!chrome.offscreen) return;
 
+  // Surface which sound will play so the exported log shows whether a custom
+  // upload is actually stored (vs. the default chime).
+  if (tone === "complete") {
+    try {
+      const stored = await chrome.storage.local.get("nuiiCustomSound");
+      const custom = stored && stored.nuiiCustomSound;
+      addLog(custom && custom.dataUrl ? `Sound: custom (${custom.name})` : "Sound: default chime");
+      await saveAndBroadcast();
+    } catch (error) {
+      // Diagnostic only; ignore.
+    }
+  }
+
   try {
     const hasDocument = await chrome.offscreen.hasDocument();
     if (!hasDocument) {

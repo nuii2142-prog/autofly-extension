@@ -132,9 +132,15 @@
       rect: elementRect(item.element)
     }));
 
-    // Snapshot existing download controls now (pre-generation) so the post-result
-    // download grabs only the controls this prompt's batch adds.
-    snapshotDownloadButtons();
+    // Before generation, record the run baseline (existing result images) so the
+    // post-result download is scoped to images this run produces, never the
+    // pre-run backlog. ensureZipRun clears a new run's stored images first.
+    if (settings.zipDownload) {
+      await ensureZipRun(settings.runId);
+    }
+    if (settings.autoDownload || settings.zipDownload) {
+      await ensureBaseline(settings.runId);
+    }
 
     return {
       success: true,
@@ -1000,7 +1006,9 @@
     runId: null,
     pending: [],
     capturedHrefs: new Set(),
-    knownDownloadButtons: new Set(),
+    baselineImageSrcs: new Set(),
+    baselineRunId: null,
+    clickedSrcs: new Set(),
     lastDiag: "",
     lastCaptureError: "",
     intercepts: 0
@@ -1100,6 +1108,74 @@
     }
   }
 
+  // Result thumbnails on the page, sorted newest-first (top-left). Identity is by
+  // image src, which changes per generated image — unlike the grid's button
+  // elements, which Firefly Image 4 REUSES across generations (swapping images in
+  // a fixed 16-slot grid), defeating element-identity diffing.
+  function collectResultImages() {
+    return deepQuerySelectorAll("img")
+      .filter(isVisible)
+      .filter((img) => {
+        const rect = img.getBoundingClientRect();
+        return rect.width >= 150 && rect.height >= 80;
+      })
+      .sort((a, b) => {
+        const ra = a.getBoundingClientRect();
+        const rb = b.getBoundingClientRect();
+        return ra.top - rb.top || ra.left - rb.left;
+      });
+  }
+
+  function imageKey(img) {
+    return img.currentSrc || img.getAttribute("src") || "";
+  }
+
+  // Record the result images that already exist before this run generates
+  // anything, so downloads can be scoped to NEW images only (never the pre-run
+  // backlog still on the accumulating feed). Persisted in IndexedDB so the
+  // mid-run tab refresh does not reset it.
+  async function ensureBaseline(runId) {
+    if (!runId) return;
+    if (zipState.baselineRunId === runId) return;
+    const stored = await idbGetMeta("baseline");
+    if (stored && stored.runId === runId && Array.isArray(stored.srcs)) {
+      zipState.baselineImageSrcs = new Set(stored.srcs);
+    } else {
+      const srcs = collectResultImages().map(imageKey).filter(Boolean);
+      zipState.baselineImageSrcs = new Set(srcs);
+      await idbSetMeta("baseline", { runId, srcs });
+    }
+    zipState.baselineRunId = runId;
+    zipState.clickedSrcs = new Set();
+  }
+
+  // Click the download controls for result images that are new this run and not
+  // already clicked. New images appear at the top, so the top-N download controls
+  // (sorted top-first) line up with the N new images. Count-independent and
+  // delayed-render tolerant: late images are picked up by a later prompt or the
+  // finalize sweep. Content dedup at finalize is the final safety net.
+  async function downloadNewImages() {
+    const baseline = zipState.baselineImageSrcs || new Set();
+    const clicked = zipState.clickedSrcs || (zipState.clickedSrcs = new Set());
+
+    const imgs = collectResultImages();
+    const fresh = imgs.filter((img) => {
+      const key = imageKey(img);
+      return key && !baseline.has(key) && !clicked.has(key);
+    });
+
+    const candidates = collectDownloadCandidates();
+    const clickN = Math.min(fresh.length, candidates.length, 16);
+
+    for (let i = 0; i < clickN; i += 1) {
+      clickElement(candidates[i].element);
+      clicked.add(imageKey(fresh[i]));
+      await sleep(450);
+    }
+
+    return { images: imgs.length, fresh: fresh.length, clicked: clickN };
+  }
+
   function anchorFromEvent(event) {
     const path = typeof event.composedPath === "function" ? event.composedPath() : [];
     for (const node of path) {
@@ -1186,8 +1262,26 @@
   }
 
   async function finalizeZip(runId) {
-    zipState.active = false;
     const targetRun = runId || zipState.runId;
+
+    // Final sweep: a prompt's images (notably the last prompt's) can render after
+    // its own download window closed; grab any still-missing new images before
+    // building the archive. Best-effort — never block the ZIP on it.
+    try {
+      await ensureZipRun(targetRun);
+      await ensureBaseline(targetRun);
+      zipState.active = true;
+      installDownloadHook();
+      zipState.pending = [];
+      await downloadNewImages();
+      await sleep(2500);
+      await Promise.allSettled(zipState.pending);
+      zipState.pending = [];
+    } catch (error) {
+      // Build from whatever was captured.
+    }
+    zipState.active = false;
+
     const records = await idbGetImagesByRun(targetRun);
     if (!records.length) {
       return { success: true, count: 0 };
@@ -1249,22 +1343,12 @@
     return DownloadButtons.filterDownloadCandidates(scanned, 9999);
   }
 
-  // Record the download controls that already exist before this prompt generates,
-  // so clickDownloadButtons can later download ONLY the controls that newly
-  // appear. This keeps each prompt scoped to its own batch and never re-grabs
-  // images from earlier batches still on the accumulating feed.
-  function snapshotDownloadButtons() {
-    zipState.knownDownloadButtons = new Set(collectDownloadCandidates().map((item) => item.element));
-  }
-
   async function clickDownloadButtons(limit, settings) {
     const opts = settings || {};
     const zipMode = Boolean(opts.zipDownload);
-    const DownloadButtons = globalThis.NuiiContentDownloads;
 
     zipState.active = zipMode;
     if (zipMode) {
-      await ensureZipRun(opts.runId);
       installDownloadHook();
       zipState.pending = [];
       zipState.intercepts = 0;
@@ -1272,18 +1356,7 @@
     }
 
     await sleep(1200);
-
-    // Download only controls that appeared since the pre-generation snapshot.
-    const candidates = collectDownloadCandidates();
-    const known = zipState.knownDownloadButtons || new Set();
-    const fallbackLimit = DownloadButtons.resolveDownloadLimit(limit);
-    const selection = DownloadButtons.selectFreshDownloads(candidates, known, { cap: 12, fallbackLimit });
-    const buttons = selection.items;
-
-    for (const item of buttons) {
-      clickElement(item.element);
-      await sleep(450);
-    }
+    const sel = await downloadNewImages();
 
     if (zipMode) {
       // Give Firefly time to create and click its download anchors so the hook
@@ -1294,15 +1367,14 @@
       const captured = results.filter((result) => result.status === "fulfilled" && result.value).length;
       const failed = results.length - captured;
       zipState.lastDiag =
-        `zip: candidates=${candidates.length} known=${known.size} fresh=${selection.fresh} strat=${selection.strategy}`
-        + ` clicked=${buttons.length} intercepts=${zipState.intercepts} captured=${captured} failed=${failed}`
+        `zip: images=${sel.images} baseline=${(zipState.baselineImageSrcs || new Set()).size} new=${sel.fresh} clicked=${sel.clicked}`
+        + ` intercepts=${zipState.intercepts} captured=${captured} failed=${failed}`
         + (failed ? ` err=${truncate(zipState.lastCaptureError, 60)}` : "");
       return captured;
     }
 
-    zipState.lastDiag =
-      `dl: candidates=${candidates.length} known=${known.size} fresh=${selection.fresh} strat=${selection.strategy} clicked=${buttons.length}`;
-    return buttons.length;
+    zipState.lastDiag = `dl: images=${sel.images} new=${sel.fresh} clicked=${sel.clicked}`;
+    return sel.clicked;
   }
 
   async function preferGridView() {

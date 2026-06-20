@@ -231,6 +231,29 @@ off-by-default option.
   the uploaded sound through the Web Audio API (`decodeAudioData` + buffer
   source), the same path the working chime uses.
 
+## Download scoping rev 2 — src-based (replaces button-element snapshot)
+
+The button-element snapshot (`selectFreshDownloads`, removed) failed on Firefly
+Image 4, which uses a **fixed 16-slot grid that reuses the same button elements**
+while swapping the images inside them — so element-identity diff saw "nothing new"
+(under-download: 12 of 20) and occasionally "everything new". Reworked to track
+identity by **result image src**:
+
+- `ensureBaseline(runId)` (called in `submitPrompt`, before generation) records
+  the pre-run result-image srcs, persisted in IndexedDB meta `baseline` so the
+  mid-run refresh can't reset it. Excludes the pre-run backlog.
+- `downloadNewImages()` clicks the top-N download controls where N = result
+  images whose src is not in the baseline and not already clicked
+  (`zipState.clickedSrcs`). New images are at the top, so top-N controls line up
+  with them. Count-independent; tolerant of delayed rendering (a later prompt, or
+  the finalize sweep, picks up stragglers).
+- `finalizeZip` runs a **final sweep** (`downloadNewImages` once more) before
+  building, to catch the last prompt's late-rendering images, then content-dedups.
+- Diag: `zip: images=.. baseline=.. new=.. clicked=.. captured=.. failed=..`.
+
+Sound diagnostic: `playCompletionSound` logs `Sound: custom (name)` vs
+`Sound: default chime` so the exported log shows whether the upload is stored.
+
 ## Follow-on features added
 
 - **App icons** (`icons/*`) generated from `design/icon-source-chosen.jpeg`,
