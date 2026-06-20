@@ -579,7 +579,7 @@ async function initCustomSound() {
 }
 
 function setSoundName(name) {
-  elements.soundName.textContent = name ? name : "Default chime";
+  elements.soundName.textContent = name ? name : "Built-in notification";
 }
 
 function readFileAsDataUrl(file) {
@@ -617,21 +617,18 @@ async function handleSoundFile(event) {
 
 async function testCustomSound() {
   const custom = await storageGet(CUSTOM_SOUND_KEY);
-  if (custom && custom.dataUrl) {
-    try {
-      await new Audio(custom.dataUrl).play();
-    } catch (error) {
-      renderNotice("Could not play the sound in this view.");
-    }
-  } else {
-    renderNotice("No custom sound set — the default chime will play.");
+  const src = custom && custom.dataUrl ? custom.dataUrl : chrome.runtime.getURL("sounds/notification.mp3");
+  try {
+    await new Audio(src).play();
+  } catch (error) {
+    renderNotice("Could not play the sound in this view.");
   }
 }
 
 async function resetCustomSound() {
   await new Promise((resolve) => chrome.storage.local.remove(CUSTOM_SOUND_KEY, () => resolve()));
   setSoundName("");
-  renderNotice("Reverted to the default chime.");
+  renderNotice("Reverted to the built-in notification sound.");
 }
 
 function storageGet(key) {

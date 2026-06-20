@@ -1147,6 +1147,24 @@
   // above this label. This is what lets us ignore older batches even when the
   // user re-uses the same prompts across runs (same label text). Persisted in
   // IndexedDB so the mid-run refresh can't lose it.
+  // The topmost label that actually heads a result batch — i.e. has a download
+  // control in its band. Plain top-of-page UI text has no controls under it, so
+  // this avoids anchoring the boundary at Y=0 (which excluded everything).
+  function topmostBatchLabelText() {
+    const labels = findBatchLabels();
+    const candidates = collectDownloadCandidates();
+    for (let i = 0; i < labels.length; i += 1) {
+      const top = labels[i].top - 20;
+      const bottom = i + 1 < labels.length ? labels[i + 1].top : Infinity;
+      const hasControl = candidates.some((item) => {
+        const y = item.element.getBoundingClientRect().top;
+        return y >= top && y < bottom;
+      });
+      if (hasControl) return labels[i].text;
+    }
+    return null;
+  }
+
   async function ensureRunStart(runId) {
     if (!runId) return;
     if (zipState.runStartRunId === runId) return;
@@ -1154,8 +1172,7 @@
     if (stored && stored.runId === runId) {
       zipState.runStartTopText = stored.text || null;
     } else {
-      const labels = findBatchLabels();
-      zipState.runStartTopText = labels.length ? labels[0].text : null;
+      zipState.runStartTopText = topmostBatchLabelText();
       await idbSetMeta("runStartTop", { runId, text: zipState.runStartTopText });
     }
     zipState.runStartRunId = runId;

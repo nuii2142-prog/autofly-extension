@@ -13,6 +13,7 @@ chrome.runtime.onMessage.addListener((message) => {
 // and the outcome is reported to the background so it shows in the run log.
 async function playCompletion(tone) {
   if (tone === "complete") {
+    // 1) A user-uploaded sound overrides everything.
     let custom = null;
     try {
       const stored = await chrome.storage.local.get("nuiiCustomSound");
@@ -22,15 +23,27 @@ async function playCompletion(tone) {
     }
     if (custom && custom.dataUrl) {
       try {
-        await playDataUrl(custom.dataUrl);
-        reportSound(true, "");
+        await playArrayBuffer(dataUrlToArrayBuffer(custom.dataUrl));
+        reportSound(true, "custom");
         return;
       } catch (error) {
-        reportSound(false, (error && error.message) || "playback failed");
-        // Fall through to the built-in chime.
+        reportSound(false, `custom: ${(error && error.message) || "playback failed"}`);
       }
     }
+
+    // 2) The bundled notification sound (packaged file, fetched by extension URL
+    //    so it is not subject to the data: URL CSP that blocked uploads).
+    try {
+      const response = await fetch(chrome.runtime.getURL("sounds/notification.mp3"));
+      await playArrayBuffer(await response.arrayBuffer());
+      reportSound(true, "bundled");
+      return;
+    } catch (error) {
+      reportSound(false, `bundled: ${(error && error.message) || "playback failed"}`);
+    }
   }
+
+  // 3) Last-resort synthesized chime.
   playChime(tone);
 }
 
@@ -57,10 +70,10 @@ function dataUrlToArrayBuffer(dataUrl) {
   return bytes.buffer;
 }
 
-// Play an uploaded sound through the Web Audio API — the same path the chime uses
-// (HTMLAudioElement.play() is blocked by the offscreen autoplay policy). Resumes a
-// suspended context and supports both the promise and callback forms of decode.
-async function playDataUrl(dataUrl) {
+// Play raw encoded audio bytes through the Web Audio API — the same path the chime
+// uses (HTMLAudioElement.play() is blocked by the offscreen autoplay policy).
+// Resumes a suspended context and supports both decodeAudioData forms.
+async function playArrayBuffer(arrayBuffer) {
   const AudioCtx = self.AudioContext || self.webkitAudioContext;
   if (!AudioCtx) throw new Error("AudioContext unavailable");
 
@@ -69,7 +82,6 @@ async function playDataUrl(dataUrl) {
     if (ctx.state === "suspended" && ctx.resume) {
       await ctx.resume();
     }
-    const arrayBuffer = dataUrlToArrayBuffer(dataUrl);
     const audioBuffer = await new Promise((resolve, reject) => {
       const maybePromise = ctx.decodeAudioData(arrayBuffer, resolve, reject);
       if (maybePromise && typeof maybePromise.then === "function") {
