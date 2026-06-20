@@ -171,19 +171,25 @@ off-by-default option.
 - Per-prompt diagnostics in the exported run log: `zip: scanned=.. downloadish=..
   picked=.. clicked=.. intercepts=.. captured=.. failed=..` and `res: ...`.
 
-**Fixed, needs live re-confirmation:**
-- Resolution stuck at 1K on **Firefly Image 5**: matching now normalizes the
-  value/testid/label (`firefly-menu-item-2K` → `2K`), retries up to 3×, and logs
-  a `res:` diagnostic. The likely cause was the menu item exposing only a
-  `data-testid` (no `value` attribute), so the old strict `=== "2K"` compare
-  never confirmed. Confirm via the `res: set 2K ...` log on the next Image 5 run.
+**Resolution (2K) — root cause found, rewritten, needs live re-confirmation:**
+- The `res:` diagnostic proved the real cause: the old selector
+  `[data-testid^="firefly-menu-item-"]` matched the **model picker**
+  (`firefly-menu-item-ADOBE:FIREFLY:COLLIGO:IMAGE5`, …) and the **action menu**
+  (`firefly-menu-item-EDITIMAGE`, …) — never the resolution picker. So "2K" was
+  never found and it stayed 1K (the earlier testid-normalize fix was treating the
+  wrong menu).
+- Rewritten (`applyResolution` in content.js): the control is now located by its
+  **value text** — only the resolution picker renders a bare `1K`/`2K` token —
+  preferring an element near a "Resolution" label. It opens that picker, clicks
+  the option whose text resolves to the target, and verifies the displayed value
+  flipped. Runs per prompt (after the start-of-run refresh, before each Generate)
+  and logs `res: set 2K [...]` / `res: NOT-confirmed ... [candidates]`.
+- Confirm on the next Image 5 run via `res: set 2K`. If still failing, the
+  `[candidates]` list in the diagnostic shows the real DOM to refine against.
 
-**Known / open:**
-- On Firefly Image 5 the per-prompt capture saw `newImages 1` (only 1 of 4
-  images captured), while Image 4 saw 4. The download limit comes from
-  `newImageCount`; Image 5's result UI differs. Revisit if the user needs all 4
-  per prompt on Image 5 — the new `res:`/`zip:` diagnostics will show the DOM
-  shape to base a fix on. One image at a time, verify before piling on changes.
+**Resolved / not-a-bug:**
+- Firefly Image 5 generating 1 image per prompt is normal (user confirmed) — no
+  change needed; the per-prompt capture of 1 image is correct.
 
 ## Out of scope (YAGNI)
 

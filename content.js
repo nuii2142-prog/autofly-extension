@@ -145,124 +145,139 @@
     };
   }
 
-  // Re-apply the requested image resolution before each Generate. A Firefly tab
-  // reload resets the picker to its 1K default, and the picker selection is not
-  // persisted anywhere we can pre-seed (no relevant localStorage key), so the
-  // only reliable path is to drive the Spectrum menu the same way a user would.
-  // A failure here never blocks the run: it returns a reason and we generate at
-  // whatever resolution the page currently holds.
+  // Re-apply and verify the requested image resolution before each Generate. A
+  // Firefly tab reload resets the picker to its 1K default and the selection is
+  // not persisted anywhere we can pre-seed, so we drive the picker like a user.
+  // The control is found by its VALUE text ("1K"/"2K"), which is unique to the
+  // resolution picker, rather than a testid: Firefly's firefly-menu-item-*
+  // testids belong to the model and action menus, not this picker -- that
+  // mismatch is why 2K silently stayed at 1K (notably on Image 5). A failure
+  // never blocks the run: it logs a reason and generates at the current value.
   let lastResolutionDiag = "";
+
+  // Standalone "1K"/"2K" token inside a short label, e.g. "2K" or "Resolution 2K".
+  function extractResolutionToken(text) {
+    const match = /(^|[^A-Za-z0-9])([12]K)([^A-Za-z0-9]|$)/i.exec(String(text == null ? "" : text).trim());
+    return match ? match[2].toUpperCase() : null;
+  }
+
+  // True when an ancestor (across shadow hosts) carries the "Resolution" label.
+  function nearResolutionLabel(element) {
+    let node = element;
+    for (let depth = 0; depth < 5 && node; depth += 1) {
+      const host = node.parentNode && node.parentNode.host ? node.parentNode.host : node.parentNode;
+      node = host || null;
+      if (node && /resolution/i.test(node.textContent || "")) return true;
+    }
+    return false;
+  }
 
   async function applyResolution(target) {
     if (!ResolutionControl || !ResolutionControl.isSupportedResolution(target)) {
       lastResolutionDiag = `res: unsupported target=${target || "?"}`;
       return { applied: false, reason: "unsupported", target: target || null };
     }
+    const wanted = ResolutionControl.normalizeResolution(target);
 
-    const readItems = () =>
-      deepQuerySelectorAll(ResolutionControl.RESOLUTION_ITEM_SELECTOR).map((element) => ({
-        value: element.getAttribute("value") || element.getAttribute("data-testid"),
-        testid: element.getAttribute("data-testid"),
-        label: (element.textContent || "").trim(),
-        checked: element.getAttribute("aria-checked") === "true"
-      }));
+    // Elements that display a bare 1K/2K value. Only the resolution control does
+    // this, so the token isolates it from the model and aspect-ratio pickers.
+    const valueElements = () =>
+      deepQuerySelectorAll('sp-picker, [role="combobox"], [role="button"], button, sp-action-button, span, div')
+        .filter(isVisible)
+        .map((element) => ({
+          element,
+          token: extractResolutionToken(element.textContent),
+          text: (element.textContent || "").trim(),
+          kids: element.children ? element.children.length : 0
+        }))
+        .filter((entry) => entry.token && entry.text.length <= 24);
 
-    // Compact summary of the picker's options (normalized; "*" marks checked)
-    // so a misbehaving model UI is debuggable from the exported run log.
+    // Prefer a value element near the "Resolution" label, then the most specific.
+    const pickValueElement = () => {
+      const entries = valueElements();
+      entries.sort(
+        (a, b) =>
+          (nearResolutionLabel(b.element) - nearResolutionLabel(a.element)) ||
+          (a.kids - b.kids) ||
+          (a.text.length - b.text.length)
+      );
+      return entries.length ? entries[0].element : null;
+    };
+
+    const readCurrent = () => {
+      const element = pickValueElement();
+      return element ? extractResolutionToken(element.textContent) : null;
+    };
+
     const describe = () =>
-      readItems()
-        .slice(0, 8)
-        .map((item) => `${ResolutionControl.normalizeResolution(item.value || item.testid)}${item.checked ? "*" : ""}`)
-        .join(",");
+      valueElements()
+        .slice(0, 6)
+        .map((entry) => `${entry.element.tagName}:${entry.text}${nearResolutionLabel(entry.element) ? "@res" : ""}`)
+        .join(" | ");
 
-    if (!ResolutionControl.needsChange(readItems(), target)) {
-      lastResolutionDiag = `res: already ${target} [${describe()}]`;
-      return { applied: true, already: true, resolution: target };
+    if (readCurrent() === wanted) {
+      lastResolutionDiag = `res: already ${wanted} [${describe()}]`;
+      return { applied: true, already: true, resolution: wanted };
     }
 
-    // Match the option by value, visible label, or testid (tolerant) rather than
-    // a single strict testid selector, so a model whose menu item lacks a value
-    // attribute still resolves correctly.
-    const findOption = () =>
-      deepQuerySelectorAll(ResolutionControl.RESOLUTION_ITEM_SELECTOR)
+    // The target option inside the opened menu: a menu item whose text resolves
+    // to the target (model/action items never contain a 1K/2K token).
+    const findOption = () => {
+      const byText = deepQuerySelectorAll('sp-menu-item, [role="option"], [role="menuitemradio"], [role="menuitem"]')
         .filter(isVisible)
-        .find((element) =>
-          ResolutionControl.itemMatchesResolution(
-            {
-              value: element.getAttribute("value") || element.getAttribute("data-testid"),
-              testid: element.getAttribute("data-testid"),
-              label: (element.textContent || "").trim()
-            },
-            target
-          )
-        ) || null;
+        .find((element) => extractResolutionToken(element.getAttribute("value") || element.textContent) === wanted);
+      return byText || firstVisible(deepQuerySelectorAll(ResolutionControl.menuItemSelector(target)));
+    };
 
     let confirmed = false;
     let attempts = 0;
+    let note = "";
     while (!confirmed && attempts < 3) {
       attempts += 1;
 
-      // The option is only clickable when the picker menu is open. After a reload
-      // it is usually closed, so open it via the Resolution trigger first.
-      let option = findOption();
-      if (!option) {
-        const trigger = findResolutionTrigger();
-        if (trigger) {
-          clickElement(trigger);
-          option = await waitFor(() => findOption(), 3000, 150);
-        }
-      }
-
-      if (!option) {
-        lastResolutionDiag = `res: control-not-found target=${target} attempt=${attempts} [${describe()}]`;
+      const valueElement = pickValueElement();
+      if (!valueElement) {
+        note = "value-not-found";
         await sleep(400);
         continue;
       }
 
+      // Open the picker (click its clickable ancestor), then choose the option.
+      const trigger = (valueElement.closest &&
+        valueElement.closest('sp-picker, [role="combobox"], [role="button"], button, sp-action-button')) || valueElement;
+      clickElement(trigger);
+      let option = await waitFor(() => findOption(), 2200, 150);
+
+      if (!option) {
+        // Fallback: try the explicit Spectrum Resolution trigger selectors.
+        const directTrigger = firstVisible(
+          ResolutionControl.RESOLUTION_TRIGGER_SELECTORS.flatMap((selector) => deepQuerySelectorAll(selector))
+        );
+        if (directTrigger && directTrigger !== trigger) {
+          clickElement(directTrigger);
+          option = await waitFor(() => findOption(), 2200, 150);
+        }
+      }
+
+      if (!option) {
+        note = "option-not-found-after-open";
+        await sleep(300);
+        continue;
+      }
+
       clickElement(option);
-      confirmed = await waitFor(
-        () =>
-          ResolutionControl.currentResolution(readItems()) === ResolutionControl.normalizeResolution(target)
-            ? true
-            : null,
-        3000,
-        150
-      );
+      confirmed = await waitFor(() => (readCurrent() === wanted ? true : null), 2500, 150);
+      if (!confirmed) note = "selection-not-confirmed";
     }
 
     if (confirmed) {
-      lastResolutionDiag = `res: set ${target} (attempt ${attempts}) [${describe()}]`;
-      console.log(`[Nuii Auto Bulk] Resolution set to ${target}.`);
-      return { applied: true, resolution: target };
+      lastResolutionDiag = `res: set ${wanted} (attempt ${attempts}) [${describe()}]`;
+      console.log(`[Nuii Auto Bulk] Resolution set to ${wanted}.`);
+      return { applied: true, resolution: wanted };
     }
 
-    lastResolutionDiag = `res: NOT-confirmed target=${target} attempts=${attempts} [${describe()}]`;
-    return { applied: false, reason: "selection-not-confirmed", target };
-  }
-
-  // Locate the clickable control that opens the Resolution picker. Prefer the
-  // explicit Spectrum selectors; if those miss, anchor to a verified resolution
-  // menu item and walk up (across shadow boundaries) to its owning picker, which
-  // is more robust than guessing the trigger's attributes.
-  function findResolutionTrigger() {
-    const direct = firstVisible(
-      ResolutionControl.RESOLUTION_TRIGGER_SELECTORS.flatMap((selector) => deepQuerySelectorAll(selector))
-    );
-    if (direct) return direct;
-
-    const items = deepQuerySelectorAll(ResolutionControl.RESOLUTION_ITEM_SELECTOR);
-    for (const item of items) {
-      let node = item;
-      for (let depth = 0; depth < 12 && node; depth += 1) {
-        const parent = node.parentNode;
-        node = parent && parent.host ? parent.host : parent;
-        if (!node || !node.tagName) continue;
-        if (node.tagName === "SP-PICKER" || node.tagName === "SP-ACTION-BUTTON") return node;
-        if ((node.getAttribute && node.getAttribute("aria-haspopup")) && isVisible(node)) return node;
-      }
-    }
-
-    return null;
+    lastResolutionDiag = `res: NOT-confirmed target=${wanted} attempts=${attempts} ${note} [${describe()}]`;
+    return { applied: false, reason: note || "selection-not-confirmed", target: wanted };
   }
 
   async function waitForExistingResult(prompt, settings) {
