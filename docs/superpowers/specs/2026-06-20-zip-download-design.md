@@ -274,6 +274,25 @@ run. Reworked to per-prompt scoping:
 - No more run baseline / clickedSrcs / finalize sweep. Diag:
   `zip: new=.. cap=.. clicked=.. controls=.. captured=..`.
 
+## Download scoping rev 4 — prompt-label anchored (current, the user's idea)
+
+All position/identity heuristics failed because Firefly's results feed order is
+unpredictable (old lazy-loaded batches interleave with new ones; the screenshot
+showed a prior run's batch sitting between this run's). The reliable anchor is the
+**prompt text Firefly prints above each batch**:
+
+- `findBatchLabels()` returns visible leaf-ish text nodes of prompt length
+  (40–400 chars) with their top Y — the batch headers.
+- `labelMatchesPrompt(label, prompt)` matches by the first 30 chars (the label is
+  the prompt, truncated).
+- `downloadPromptBatch(prompt)` finds the matching label whose **band**
+  `[labelTop, nextLabelTop)` contains download controls, and clicks exactly those
+  — i.e. only this prompt's batch, any size, regardless of feed order or
+  lazy-loaded older batches. Waits up to 12s for the label + controls to render.
+- Content dedup at finalize stays as the final safety net. Removed the
+  src-baseline / batch-size / preGenSrcs machinery. Diag:
+  `zip: matched=.. label=".." clicked=.. captured=..`.
+
 ## Follow-on features added
 
 - **App icons** (`icons/*`) generated from `design/icon-source-chosen.jpeg`,

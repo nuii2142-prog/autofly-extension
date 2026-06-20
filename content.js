@@ -132,14 +132,10 @@
       rect: elementRect(item.element)
     }));
 
-    // Before generation: clear a new run's stored images, and snapshot the result
-    // images currently on the page so the post-result download targets only what
-    // THIS prompt adds (not the pre-run backlog or earlier prompts on the feed).
+    // Clear a new run's stored images before generation. Download scoping itself
+    // is anchored to this prompt's result-batch label (no pre-gen snapshot needed).
     if (settings.zipDownload) {
       await ensureZipRun(settings.runId);
-    }
-    if (settings.autoDownload || settings.zipDownload) {
-      zipState.preGenSrcs = new Set(collectResultImages().map(imageKey).filter(Boolean));
     }
 
     return {
@@ -312,7 +308,7 @@
     // are not re-downloaded.
     let downloads = 0;
     if (result.success && wantsDownload) {
-      downloads = await clickDownloadButtons(result.newImageCount, settings);
+      downloads = await clickDownloadButtons(prompt, settings);
     }
 
     if (result.success) {
@@ -382,8 +378,8 @@
       if (settled.complete) {
         let downloads = 0;
         if (settings.autoDownload || settings.zipDownload) {
-          // Scope History downloads to the outputs this prompt added.
-          downloads = await clickDownloadButtons(state.outputCount - (beforeState.outputCount || 0), settings);
+          // Scope History downloads to this prompt's result batch (by label).
+          downloads = await clickDownloadButtons(prompt, settings);
         }
 
         return {
@@ -1006,8 +1002,6 @@
     runId: null,
     pending: [],
     capturedHrefs: new Set(),
-    preGenSrcs: new Set(),
-    batchSize: null,
     lastDiag: "",
     lastCaptureError: "",
     intercepts: 0
@@ -1104,93 +1098,84 @@
       }
       zipState.runId = runId;
       zipState.capturedHrefs = new Set();
-      zipState.batchSize = null;
     }
   }
 
-  // Result thumbnails on the page, sorted newest-first (top-left). Identity is by
-  // image src, which changes per generated image — unlike the grid's button
-  // elements, which Firefly Image 4 REUSES across generations (swapping images in
-  // a fixed 16-slot grid), defeating element-identity diffing.
-  function collectResultImages() {
-    return deepQuerySelectorAll("img")
+  function normalizeText(value) {
+    return String(value == null ? "" : value).replace(/\s+/g, " ").trim();
+  }
+
+  // Visible batch-prompt header labels in the results feed, with their top Y.
+  // Firefly prints each generated batch's prompt text above its image grid; this
+  // is the only reliable anchor (feed order and lazy-loading are unpredictable).
+  // We keep "leaf-ish" text nodes of a prompt-like length so the headers stand
+  // out from page chrome and from the giant wrapper containers.
+  function findBatchLabels() {
+    return deepQuerySelectorAll("h1,h2,h3,h4,h5,p,span,div")
       .filter(isVisible)
-      .filter((img) => {
-        const rect = img.getBoundingClientRect();
-        return rect.width >= 150 && rect.height >= 80;
+      .filter((el) => {
+        if (el.isContentEditable) return false;
+        const text = normalizeText(el.textContent);
+        if (text.length < 40 || text.length > 400) return false;
+        const childLong = Array.prototype.some.call(
+          el.children || [],
+          (child) => normalizeText(child.textContent).length >= 40
+        );
+        return !childLong;
       })
-      .sort((a, b) => {
-        const ra = a.getBoundingClientRect();
-        const rb = b.getBoundingClientRect();
-        return ra.top - rb.top || ra.left - rb.left;
-      });
+      .map((el) => ({ top: el.getBoundingClientRect().top, text: normalizeText(el.textContent) }))
+      .sort((a, b) => a.top - b.top);
   }
 
-  function imageKey(img) {
-    return img.currentSrc || img.getAttribute("src") || "";
+  // The label is the prompt text truncated, so it contains our prompt's prefix.
+  function labelMatchesPrompt(labelText, promptText) {
+    const label = normalizeText(labelText).toLowerCase();
+    const key = normalizeText(promptText).toLowerCase().slice(0, 30);
+    return key.length >= 20 && label.includes(key);
   }
 
-  // Count result images whose src is new vs the pre-generation snapshot.
-  function countNewImages() {
-    const before = zipState.preGenSrcs || new Set();
-    return collectResultImages().filter((img) => {
-      const key = imageKey(img);
-      return key && !before.has(key);
-    }).length;
-  }
+  // Download exactly this prompt's batch: locate the batch whose header matches
+  // the prompt, then click the download controls in the vertical band between
+  // this header and the NEXT header below it. Anchoring to the prompt label makes
+  // the scope correct regardless of feed order, batch size, or lazy-loaded older
+  // batches. Waits for the label and its controls to render.
+  async function downloadPromptBatch(promptText) {
+    const deadline = Date.now() + 12000;
+    let buttons = [];
+    let matched = false;
+    let labelText = "";
 
-  // Wait for THIS prompt's images to render after "Done". Firefly can report a
-  // generation complete a beat before the thumbnails (and their download
-  // controls) appear; without waiting we either capture nothing or grab the
-  // previous batch. Settles when the new-image count is stable, or has reached
-  // the learned batch size, or the timeout elapses.
-  async function waitForNewImages() {
-    const deadline = Date.now() + 10000;
-    let last = -1;
-    let stable = 0;
-    let count = 0;
     while (Date.now() < deadline) {
-      count = countNewImages();
-      if (zipState.batchSize && count >= zipState.batchSize) break;
-      if (count === last) {
-        stable += 1;
-        if (stable >= 2 && count > 0) break;
-      } else {
-        stable = 0;
-        last = count;
+      const labels = findBatchLabels();
+      const candidates = collectDownloadCandidates();
+      // Among every label that matches this prompt (the prompt can also appear in
+      // a history sidebar), use the one whose band actually holds download
+      // controls — that's the real result batch.
+      for (let i = 0; i < labels.length; i += 1) {
+        if (!labelMatchesPrompt(labels[i].text, promptText)) continue;
+        matched = true;
+        labelText = labels[i].text.slice(0, 40);
+        const top = labels[i].top - 20;
+        const bottom = i + 1 < labels.length ? labels[i + 1].top : Infinity;
+        const band = candidates.filter((item) => {
+          const y = item.element.getBoundingClientRect().top;
+          return y >= top && y < bottom;
+        });
+        if (band.length > 0) {
+          buttons = band;
+          break;
+        }
       }
+      if (buttons.length > 0) break;
       await sleep(800);
     }
-    return count;
-  }
 
-  // Download this prompt's images: the top-N newest download controls, where N is
-  // the count of newly-rendered images capped to the run's learned batch size.
-  // New images are inserted at the TOP, so the top-N controls are exactly this
-  // prompt's batch — capping keeps any lazy-loaded OLD images (which sit below
-  // the cap) out, and content dedup at finalize is the last safety net.
-  async function downloadNewImages() {
-    const newCount = await waitForNewImages();
-
-    // Learn the per-generation batch size from the first prompt that produces
-    // images (1 for Image 5, 4 for the other Firefly image models); cap later
-    // prompts to it so an inflated count (lazy-loaded older images) never reaches
-    // past this prompt's batch. Clamp to 4 — Firefly's known batch sizes are 1
-    // and 4 — so a first-prompt over-count can't raise the cap.
-    if (!zipState.batchSize && newCount > 0) {
-      zipState.batchSize = Math.min(4, newCount);
-    }
-    const cap = zipState.batchSize || 4;
-
-    const candidates = collectDownloadCandidates();
-    const clickN = Math.min(newCount, cap, candidates.length);
-
-    for (let i = 0; i < clickN; i += 1) {
-      clickElement(candidates[i].element);
+    for (const item of buttons) {
+      clickElement(item.element);
       await sleep(450);
     }
 
-    return { newCount, cap, clicked: clickN, candidates: candidates.length };
+    return { matched, clicked: buttons.length, label: labelText };
   }
 
   function anchorFromEvent(event) {
@@ -1343,7 +1328,7 @@
     return DownloadButtons.filterDownloadCandidates(scanned, 9999);
   }
 
-  async function clickDownloadButtons(limit, settings) {
+  async function clickDownloadButtons(prompt, settings) {
     const opts = settings || {};
     const zipMode = Boolean(opts.zipDownload);
 
@@ -1356,7 +1341,7 @@
     }
 
     await sleep(1200);
-    const sel = await downloadNewImages();
+    const sel = await downloadPromptBatch(prompt || "");
 
     if (zipMode) {
       // Give Firefly time to create and click its download anchors so the hook
@@ -1367,13 +1352,13 @@
       const captured = results.filter((result) => result.status === "fulfilled" && result.value).length;
       const failed = results.length - captured;
       zipState.lastDiag =
-        `zip: new=${sel.newCount} cap=${sel.cap} clicked=${sel.clicked} controls=${sel.candidates}`
+        `zip: matched=${sel.matched} label="${sel.label}" clicked=${sel.clicked}`
         + ` intercepts=${zipState.intercepts} captured=${captured} failed=${failed}`
         + (failed ? ` err=${truncate(zipState.lastCaptureError, 60)}` : "");
       return captured;
     }
 
-    zipState.lastDiag = `dl: new=${sel.newCount} cap=${sel.cap} clicked=${sel.clicked}`;
+    zipState.lastDiag = `dl: matched=${sel.matched} clicked=${sel.clicked}`;
     return sel.clicked;
   }
 
