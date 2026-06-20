@@ -116,6 +116,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return;
     }
 
+    if (request.action === "SOUND_RESULT") {
+      addLog(request.ok
+        ? "Sound: custom played"
+        : `Sound: custom failed (${request.error || "unknown"}); used chime`);
+      await saveAndBroadcast();
+      sendResponse({ success: true });
+      return;
+    }
+
     sendResponse({ success: false, error: "Unknown action" });
   })().catch((error) => {
     console.error("[Nuii Auto Bulk] Message error:", error);

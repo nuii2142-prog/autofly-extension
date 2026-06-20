@@ -9,35 +9,73 @@ chrome.runtime.onMessage.addListener((message) => {
 
 // A user-uploaded sound (stored as a data URL in chrome.storage.local under
 // "nuiiCustomSound") replaces the synthesized chime for the "complete" tone.
-// The error tone always uses the built-in chime. Any failure falls back to it.
+// The error tone always uses the built-in chime. Any failure falls back to it,
+// and the outcome is reported to the background so it shows in the run log.
 async function playCompletion(tone) {
   if (tone === "complete") {
+    let custom = null;
     try {
       const stored = await chrome.storage.local.get("nuiiCustomSound");
-      const custom = stored && stored.nuiiCustomSound;
-      if (custom && custom.dataUrl) {
-        await playDataUrl(custom.dataUrl);
-        return;
-      }
+      custom = stored && stored.nuiiCustomSound;
     } catch (error) {
-      // Fall through to the built-in chime.
+      custom = null;
+    }
+    if (custom && custom.dataUrl) {
+      try {
+        await playDataUrl(custom.dataUrl);
+        reportSound(true, "");
+        return;
+      } catch (error) {
+        reportSound(false, (error && error.message) || "playback failed");
+        // Fall through to the built-in chime.
+      }
     }
   }
   playChime(tone);
 }
 
-// Play an uploaded sound through the Web Audio API. This mirrors the chime path,
-// which is known to work in this offscreen document; HTMLAudioElement.play() is
-// blocked by the autoplay policy here (which is why the upload fell back before).
+function reportSound(ok, error) {
+  try {
+    chrome.runtime.sendMessage({ action: "SOUND_RESULT", ok, error }, () => {
+      void chrome.runtime.lastError;
+    });
+  } catch (error) {
+    // Reporting is best-effort.
+  }
+}
+
+// Decode a data URL to an ArrayBuffer without fetch() (fetch of data: URLs can be
+// blocked by the offscreen document's CSP — a likely cause of the silent fallback).
+function dataUrlToArrayBuffer(dataUrl) {
+  const comma = dataUrl.indexOf(",");
+  const base64 = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes.buffer;
+}
+
+// Play an uploaded sound through the Web Audio API — the same path the chime uses
+// (HTMLAudioElement.play() is blocked by the offscreen autoplay policy). Resumes a
+// suspended context and supports both the promise and callback forms of decode.
 async function playDataUrl(dataUrl) {
   const AudioCtx = self.AudioContext || self.webkitAudioContext;
   if (!AudioCtx) throw new Error("AudioContext unavailable");
 
   const ctx = new AudioCtx();
   try {
-    const response = await fetch(dataUrl);
-    const arrayBuffer = await response.arrayBuffer();
-    const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+    if (ctx.state === "suspended" && ctx.resume) {
+      await ctx.resume();
+    }
+    const arrayBuffer = dataUrlToArrayBuffer(dataUrl);
+    const audioBuffer = await new Promise((resolve, reject) => {
+      const maybePromise = ctx.decodeAudioData(arrayBuffer, resolve, reject);
+      if (maybePromise && typeof maybePromise.then === "function") {
+        maybePromise.then(resolve, reject);
+      }
+    });
     const source = ctx.createBufferSource();
     source.buffer = audioBuffer;
     source.connect(ctx.destination);
@@ -47,7 +85,7 @@ async function playDataUrl(dataUrl) {
       setTimeout(resolve, (audioBuffer.duration + 1) * 1000);
     });
   } finally {
-    ctx.close().catch(() => {});
+    if (ctx.close) ctx.close().catch(() => {});
   }
 }
 

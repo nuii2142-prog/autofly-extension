@@ -293,6 +293,29 @@ showed a prior run's batch sitting between this run's). The reliable anchor is t
   src-baseline / batch-size / preGenSrcs machinery. Diag:
   `zip: matched=.. label=".." clicked=.. captured=..`.
 
+## Download scoping rev 4b — prompt label + run-start boundary
+
+Rev 4 (prompt-label match) needed two additions for the user's workflow (they
+**reuse the same prompts across runs**, so an old batch can share a new batch's
+label):
+- **Run-start boundary** (`ensureRunStart`, the user's "first prompt = queue
+  start" idea): before generation, record the topmost pre-run batch label
+  (`runStartTopText`, persisted in IDB). `downloadPromptBatch` only matches labels
+  ABOVE the boundary's current Y (`runStartBoundaryY`, the BOTTOM-most occurrence
+  of that text so re-running that exact prompt doesn't move the boundary). This
+  excludes the pre-run backlog even when prompts repeat, and combined with the
+  per-prompt wait it tolerates delayed rendering of a reused prompt's new batch.
+
+Sound: `playDataUrl` reworked — decode the data URL via `atob` (no `fetch`, whose
+data: URL can hit the offscreen CSP — the likely silent-fallback cause), resume a
+suspended `AudioContext`, support promise+callback `decodeAudioData`. Offscreen
+now reports `SOUND_RESULT {ok,error}` to the background, which logs
+`Sound: custom played` or `Sound: custom failed (…); used chime` so the cause is
+visible in the run log.
+
+NOTE: the 2026-06-20T09:16 log was still the **rev-3** build (`zip: new=.. cap=..`
+diag), so rev 4/4b were never exercised — the user must reload the extension.
+
 ## Follow-on features added
 
 - **App icons** (`icons/*`) generated from `design/icon-source-chosen.jpeg`,
