@@ -254,6 +254,26 @@ identity by **result image src**:
 Sound diagnostic: `playCompletionSound` logs `Sound: custom (name)` vs
 `Sound: default chime` so the exported log shows whether the upload is stored.
 
+## Download scoping rev 3 — per-prompt snapshot + wait + batch cap (current)
+
+Rev 2 (run-start src baseline + clickedSrcs) leaked old images and missed new
+ones: the run-start baseline was **incomplete** (Firefly lazy-loads the old grid,
+so old images appear "new" later) and thumbnail srcs aren't stable across a whole
+run. Reworked to per-prompt scoping:
+
+- `submitPrompt` snapshots `zipState.preGenSrcs` (result-image srcs right before
+  THIS prompt generates) — short window, so srcs are stable enough.
+- `waitForNewImages()` polls after "Done" until the new-image count (vs
+  preGenSrcs) settles / reaches the learned batch size / times out (10s) —
+  handles Firefly reporting complete before thumbnails render.
+- Batch size is **learned from the first producing prompt** and clamped to 4
+  (Firefly batches are 1 or 4). `downloadNewImages()` clicks the **top-N** newest
+  download controls where N = min(newCount, batchCap). New images are inserted at
+  the TOP, so top-N is exactly this prompt's batch; the cap keeps lazy-loaded old
+  images (which sit below the cap) out. Content dedup at finalize is the last net.
+- No more run baseline / clickedSrcs / finalize sweep. Diag:
+  `zip: new=.. cap=.. clicked=.. controls=.. captured=..`.
+
 ## Follow-on features added
 
 - **App icons** (`icons/*`) generated from `design/icon-source-chosen.jpeg`,
