@@ -1115,15 +1115,18 @@
   // We keep "leaf-ish" text nodes of a prompt-like length so the headers stand
   // out from page chrome and from the giant wrapper containers.
   function findBatchLabels() {
+    // Upper bound is generous: a header's textContent holds the FULL prompt (CSS
+    // only truncates it visually), and prompts can be 400-600+ chars. "leaf-ish"
+    // (no child with long text) keeps us off the giant wrapper containers.
     return deepQuerySelectorAll("h1,h2,h3,h4,h5,p,span,div")
       .filter(isVisible)
       .filter((el) => {
         if (el.isContentEditable) return false;
         const text = normalizeText(el.textContent);
-        if (text.length < 40 || text.length > 400) return false;
+        if (text.length < 20 || text.length > 2000) return false;
         const childLong = Array.prototype.some.call(
           el.children || [],
-          (child) => normalizeText(child.textContent).length >= 40
+          (child) => normalizeText(child.textContent).length >= 20
         );
         return !childLong;
       })
@@ -1184,6 +1187,7 @@
     let buttons = [];
     let matched = false;
     let labelText = "";
+    let stats = { labels: 0, promptMatches: 0, aboveBoundary: 0, boundaried: false };
 
     while (Date.now() < deadline) {
       const labels = findBatchLabels();
@@ -1191,9 +1195,12 @@
       // Only consider batches ABOVE the run-start boundary — i.e. created by THIS
       // run — so an older batch with the same prompt text is never chosen.
       const boundaryY = runStartBoundaryY(labels);
+      stats = { labels: labels.length, promptMatches: 0, aboveBoundary: 0, boundaried: boundaryY !== Infinity };
       for (let i = 0; i < labels.length; i += 1) {
-        if (labels[i].top >= boundaryY) continue;
         if (!labelMatchesPrompt(labels[i].text, promptText)) continue;
+        stats.promptMatches += 1;
+        if (labels[i].top >= boundaryY) continue;
+        stats.aboveBoundary += 1;
         matched = true;
         labelText = labels[i].text.slice(0, 40);
         const top = labels[i].top - 20;
@@ -1216,7 +1223,7 @@
       await sleep(450);
     }
 
-    return { matched, clicked: buttons.length, label: labelText };
+    return { matched, clicked: buttons.length, label: labelText, ...stats };
   }
 
   function anchorFromEvent(event) {
@@ -1393,13 +1400,14 @@
       const captured = results.filter((result) => result.status === "fulfilled" && result.value).length;
       const failed = results.length - captured;
       zipState.lastDiag =
-        `zip: matched=${sel.matched} label="${sel.label}" clicked=${sel.clicked}`
-        + ` intercepts=${zipState.intercepts} captured=${captured} failed=${failed}`
+        `zip: labels=${sel.labels} pm=${sel.promptMatches} ab=${sel.aboveBoundary} bnd=${sel.boundaried}`
+        + ` clicked=${sel.clicked} intercepts=${zipState.intercepts} captured=${captured} failed=${failed}`
+        + ` label="${sel.label}"`
         + (failed ? ` err=${truncate(zipState.lastCaptureError, 60)}` : "");
       return captured;
     }
 
-    zipState.lastDiag = `dl: matched=${sel.matched} clicked=${sel.clicked}`;
+    zipState.lastDiag = `dl: labels=${sel.labels} pm=${sel.promptMatches} ab=${sel.aboveBoundary} clicked=${sel.clicked}`;
     return sel.clicked;
   }
 
