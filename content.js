@@ -132,6 +132,10 @@
       rect: elementRect(item.element)
     }));
 
+    // Snapshot existing download controls now (pre-generation) so the post-result
+    // download grabs only the controls this prompt's batch adds.
+    snapshotDownloadButtons();
+
     return {
       success: true,
       stage: "prepared",
@@ -996,6 +1000,7 @@
     runId: null,
     pending: [],
     capturedHrefs: new Set(),
+    knownDownloadButtons: new Set(),
     lastDiag: "",
     lastCaptureError: "",
     intercepts: 0
@@ -1214,30 +1219,10 @@
     return { success: true, count: entries.length, filename };
   }
 
-  async function clickDownloadButtons(limit, settings) {
-    const opts = settings || {};
-    const zipMode = Boolean(opts.zipDownload);
+  // All visible, enabled download controls on the page, sorted newest-first
+  // (the newest batch is inserted at the top of the results feed).
+  function collectDownloadCandidates() {
     const DownloadButtons = globalThis.NuiiContentDownloads;
-    // The newest batch is inserted at the top of the results feed, so ordering
-    // download controls top-first and capping to this prompt's image count
-    // targets the current batch and skips older batches still on the page.
-    // An unknown count resolves to 0: better to skip than re-download old work.
-    const max = DownloadButtons.resolveDownloadLimit(limit);
-    if (!max) {
-      zipState.lastDiag = `zip: skipped (limit=${limit})`;
-      return 0;
-    }
-
-    zipState.active = zipMode;
-    if (zipMode) {
-      await ensureZipRun(opts.runId);
-      installDownloadHook();
-      zipState.pending = [];
-      zipState.intercepts = 0;
-      zipState.lastCaptureError = "";
-    }
-
-    await sleep(1200);
     const scanned = deepQuerySelectorAll("button, [role='button'], a, sp-button")
       .filter(isVisible)
       .filter((element) => !isDisabled(element))
@@ -1251,18 +1236,39 @@
           inNavigation: Boolean(element.closest && element.closest("nav, header, footer, [role='navigation'], [aria-label*='navigation' i]"))
         }
       }));
-    const buttons = DownloadButtons.filterDownloadCandidates(scanned, max);
+    return DownloadButtons.filterDownloadCandidates(scanned, 9999);
+  }
 
-    let diagPrefix = "";
+  // Record the download controls that already exist before this prompt generates,
+  // so clickDownloadButtons can later download ONLY the controls that newly
+  // appear. This keeps each prompt scoped to its own batch and never re-grabs
+  // images from earlier batches still on the accumulating feed.
+  function snapshotDownloadButtons() {
+    zipState.knownDownloadButtons = new Set(collectDownloadCandidates().map((item) => item.element));
+  }
+
+  async function clickDownloadButtons(limit, settings) {
+    const opts = settings || {};
+    const zipMode = Boolean(opts.zipDownload);
+    const DownloadButtons = globalThis.NuiiContentDownloads;
+
+    zipState.active = zipMode;
     if (zipMode) {
-      // Surface what the download-control scan saw so a failed run is debuggable
-      // from the exported JSON log (labels are UI text, never prompt content).
-      const downloadish = scanned
-        .filter((candidate) => /download|save/i.test(candidate.descriptor.label || ""))
-        .slice(0, 6)
-        .map((candidate) => `${candidate.descriptor.tagName}:${truncate(candidate.descriptor.label || "", 24)}`);
-      diagPrefix = `zip: scanned=${scanned.length} downloadish=${downloadish.length} picked=${buttons.length} [${downloadish.join(" | ")}]`;
+      await ensureZipRun(opts.runId);
+      installDownloadHook();
+      zipState.pending = [];
+      zipState.intercepts = 0;
+      zipState.lastCaptureError = "";
     }
+
+    await sleep(1200);
+
+    // Download only controls that appeared since the pre-generation snapshot.
+    const candidates = collectDownloadCandidates();
+    const known = zipState.knownDownloadButtons || new Set();
+    const fallbackLimit = DownloadButtons.resolveDownloadLimit(limit);
+    const selection = DownloadButtons.selectFreshDownloads(candidates, known, { cap: 12, fallbackLimit });
+    const buttons = selection.items;
 
     for (const item of buttons) {
       clickElement(item.element);
@@ -1277,11 +1283,15 @@
       zipState.pending = [];
       const captured = results.filter((result) => result.status === "fulfilled" && result.value).length;
       const failed = results.length - captured;
-      zipState.lastDiag = `${diagPrefix} clicked=${buttons.length} intercepts=${zipState.intercepts} captured=${captured} failed=${failed}`
+      zipState.lastDiag =
+        `zip: candidates=${candidates.length} known=${known.size} fresh=${selection.fresh} strat=${selection.strategy}`
+        + ` clicked=${buttons.length} intercepts=${zipState.intercepts} captured=${captured} failed=${failed}`
         + (failed ? ` err=${truncate(zipState.lastCaptureError, 60)}` : "");
       return captured;
     }
 
+    zipState.lastDiag =
+      `dl: candidates=${candidates.length} known=${known.size} fresh=${selection.fresh} strat=${selection.strategy} clicked=${buttons.length}`;
     return buttons.length;
   }
 

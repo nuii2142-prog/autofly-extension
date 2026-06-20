@@ -35,10 +35,35 @@
     return Math.min(count, 8);
   }
 
+  // Choose which download controls to click for THIS prompt. Prefer controls
+  // that newly appeared since the pre-generation snapshot (knownElements): that
+  // scopes the download to the batch this prompt produced and never re-grabs
+  // older batches still on the accumulating results feed. If the diff looks
+  // unreliable (more fresh controls than a single batch could hold, e.g. the
+  // feed virtualized/re-rendered and every element looks new), fall back to the
+  // top-N by detected count. No fresh controls means nothing new to download.
+  function selectFreshDownloads(candidates, knownElements, options) {
+    const opts = options || {};
+    const cap = Number.isFinite(opts.cap) ? opts.cap : 12;
+    const fallbackLimit = Number.isFinite(opts.fallbackLimit) ? opts.fallbackLimit : 0;
+    const known = knownElements || new Set();
+    const list = Array.isArray(candidates) ? candidates : [];
+    const fresh = list.filter((item) => item && !known.has(item.element));
+
+    if (fresh.length > 0 && fresh.length <= cap) {
+      return { items: fresh, strategy: "fresh", fresh: fresh.length };
+    }
+    if (fresh.length > cap) {
+      return { items: list.slice(0, Math.max(0, fallbackLimit)), strategy: "fallback", fresh: fresh.length };
+    }
+    return { items: [], strategy: "none", fresh: 0 };
+  }
+
   const api = {
     isSafeDownloadCandidate,
     filterDownloadCandidates,
-    resolveDownloadLimit
+    resolveDownloadLimit,
+    selectFreshDownloads
   };
 
   root.NuiiContentDownloads = api;

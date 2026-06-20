@@ -197,6 +197,26 @@ off-by-default option.
 - Firefly Image 5 generating 1 image per prompt is normal (user confirmed) — no
   change needed; the per-prompt capture of 1 image is correct.
 
+**Resolution — CONFIRMED working (2026-06-20T04:29 Image 5 log):**
+- `res: already 2K [SPAN:2K@res | DIV:2K@res]` every prompt — the value-text
+  detection finds and verifies the resolution control. Note: on **Image 4** the
+  same log family shows `res: NOT-confirmed ... value-not-found []` — Image 4's
+  UI exposes no bare 1K/2K value element (different/absent resolution control);
+  the user reports Image 4 output size is fine, so left as-is.
+
+**Download scoping — FIXED via snapshot-diff (`selectFreshDownloads`):**
+- Old bug: clicked the top-N download controls where N = a flaky `newImages`
+  count. On the accumulating feed (135+ outputs) this over-/under-counted and
+  pulled images from older batches; when N=0 it skipped a prompt entirely, whose
+  images the next prompt then grabbed (cascade). Logs showed e.g. `newImages 8 →
+  captured 8` for one prompt, and `zip: skipped (limit=0)`.
+- Fix: `submitPrompt` snapshots the set of existing download controls
+  (`zipState.knownDownloadButtons`) before generation; `clickDownloadButtons`
+  then downloads only controls NOT in the snapshot (`selectFreshDownloads`),
+  capped at 12 with a top-N fallback if the diff looks unreliable (feed
+  re-render). Count-independent; never re-grabs old batches; also recovers the
+  N=0 prompts. New diag: `zip: candidates=.. known=.. fresh=.. strat=.. ...`.
+
 ## Out of scope (YAGNI)
 
 - DEFLATE compression (STORE is sufficient for already-compressed images).
