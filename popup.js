@@ -287,10 +287,6 @@ async function requestState() {
 }
 
 async function handleStartOrResume() {
-  // Request the optional debugger permission first, while the click gesture is
-  // still active. Denial is fine: the run falls back to DOM clicks only.
-  const debuggerGranted = await ensureDebuggerPermission();
-
   if (lastState && lastState.status === "Paused") {
     await sendMessage({ action: "RESUME_PROCESSING" });
     return;
@@ -300,10 +296,6 @@ async function handleStartOrResume() {
   if (!promptEntries.length) {
     renderNotice("Add prompts before starting.");
     return;
-  }
-
-  if (!debuggerGranted) {
-    renderNotice("Debugger fallback disabled; using standard clicks only.");
   }
 
   await refreshTarget();
@@ -521,23 +513,6 @@ function sendMessage(message) {
       });
     } catch (error) {
       resolve({ success: false, error: error.message });
-    }
-  });
-}
-
-function ensureDebuggerPermission() {
-  return new Promise((resolve) => {
-    try {
-      // Resolves true without any prompt when the permission is already granted.
-      chrome.permissions.request({ permissions: ["debugger"] }, (granted) => {
-        if (chrome.runtime.lastError) {
-          resolve(false);
-          return;
-        }
-        resolve(Boolean(granted));
-      });
-    } catch (error) {
-      resolve(false);
     }
   });
 }

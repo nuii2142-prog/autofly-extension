@@ -182,9 +182,6 @@ function startProcessing(request) {
   if (settings.platform === "firefly") {
     addLog(`Resolution target for this run: ${settings.resolution}`);
   }
-  if (!chrome.debugger) {
-    addLog("Debugger fallback unavailable; using DOM clicks only");
-  }
   saveAndBroadcast();
   processQueue();
   return { success: true };
