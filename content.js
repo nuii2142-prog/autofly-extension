@@ -132,12 +132,10 @@
       rect: elementRect(item.element)
     }));
 
-    // Clear a new run's stored images and record the pre-run batch boundary
-    // before generation. Download scoping is then anchored to this prompt's
-    // result-batch label, restricted to batches created after the boundary.
+    // Clear a new run's stored images before generation. Download scoping is
+    // anchored to each prompt's own result-batch label (see downloadPromptBatch).
     if (settings.zipDownload) {
       await ensureZipRun(settings.runId);
-      await ensureRunStart(settings.runId);
     }
 
     return {
@@ -1004,8 +1002,6 @@
     runId: null,
     pending: [],
     capturedHrefs: new Set(),
-    runStartRunId: null,
-    runStartTopText: null,
     lastDiag: "",
     lastCaptureError: "",
     intercepts: 0
@@ -1141,59 +1137,6 @@
     return key.length >= 20 && label.includes(key);
   }
 
-  // Record the topmost (most recent) batch label that already exists before this
-  // run generates anything — the boundary between the pre-run backlog and this
-  // run's output. New batches insert ABOVE it, so this run's images are the ones
-  // above this label. This is what lets us ignore older batches even when the
-  // user re-uses the same prompts across runs (same label text). Persisted in
-  // IndexedDB so the mid-run refresh can't lose it.
-  // The topmost label that actually heads a result batch — i.e. has a download
-  // control in its band. Plain top-of-page UI text has no controls under it, so
-  // this avoids anchoring the boundary at Y=0 (which excluded everything).
-  function topmostBatchLabelText() {
-    const labels = findBatchLabels();
-    const candidates = collectDownloadCandidates();
-    for (let i = 0; i < labels.length; i += 1) {
-      const top = labels[i].top - 20;
-      const bottom = i + 1 < labels.length ? labels[i + 1].top : Infinity;
-      const hasControl = candidates.some((item) => {
-        const y = item.element.getBoundingClientRect().top;
-        return y >= top && y < bottom;
-      });
-      if (hasControl) return labels[i].text;
-    }
-    return null;
-  }
-
-  async function ensureRunStart(runId) {
-    if (!runId) return;
-    if (zipState.runStartRunId === runId) return;
-    const stored = await idbGetMeta("runStartTop");
-    if (stored && stored.runId === runId) {
-      zipState.runStartTopText = stored.text || null;
-    } else {
-      zipState.runStartTopText = topmostBatchLabelText();
-      await idbSetMeta("runStartTop", { runId, text: zipState.runStartTopText });
-    }
-    zipState.runStartRunId = runId;
-  }
-
-  // Y coordinate of the pre-run boundary label right now (it sinks as this run's
-  // batches insert above it). Everything above this Y is this run's output. Use
-  // the BOTTOM-most occurrence of the boundary text: if the user re-runs that
-  // same prompt this run, the new batch appears above the original, and we must
-  // keep the boundary pinned to the original (lower) one.
-  function runStartBoundaryY(labels) {
-    if (!zipState.runStartTopText) return Infinity;
-    let y = null;
-    for (const label of labels) {
-      if (label.text === zipState.runStartTopText && (y === null || label.top > y)) {
-        y = label.top;
-      }
-    }
-    return y === null ? Infinity : y;
-  }
-
   // Download exactly this prompt's batch: locate the batch whose header matches
   // the prompt, then click the download controls in the vertical band between
   // this header and the NEXT header below it. Anchoring to the prompt label makes
@@ -1204,20 +1147,15 @@
     let buttons = [];
     let matched = false;
     let labelText = "";
-    let stats = { labels: 0, promptMatches: 0, aboveBoundary: 0, boundaried: false };
+    let stats = { labels: 0, promptMatches: 0 };
 
     while (Date.now() < deadline) {
       const labels = findBatchLabels();
       const candidates = collectDownloadCandidates();
-      // Only consider batches ABOVE the run-start boundary — i.e. created by THIS
-      // run — so an older batch with the same prompt text is never chosen.
-      const boundaryY = runStartBoundaryY(labels);
-      stats = { labels: labels.length, promptMatches: 0, aboveBoundary: 0, boundaried: boundaryY !== Infinity };
+      stats = { labels: labels.length, promptMatches: 0 };
       for (let i = 0; i < labels.length; i += 1) {
         if (!labelMatchesPrompt(labels[i].text, promptText)) continue;
         stats.promptMatches += 1;
-        if (labels[i].top >= boundaryY) continue;
-        stats.aboveBoundary += 1;
         matched = true;
         labelText = labels[i].text.slice(0, 40);
         const top = labels[i].top - 20;
@@ -1426,14 +1364,14 @@
       const captured = results.filter((result) => result.status === "fulfilled" && result.value).length;
       const failed = results.length - captured;
       zipState.lastDiag =
-        `zip: labels=${sel.labels} pm=${sel.promptMatches} ab=${sel.aboveBoundary} bnd=${sel.boundaried}`
-        + ` clicked=${sel.clicked} intercepts=${zipState.intercepts} captured=${captured} failed=${failed}`
+        `zip: labels=${sel.labels} pm=${sel.promptMatches} clicked=${sel.clicked}`
+        + ` intercepts=${zipState.intercepts} captured=${captured} failed=${failed}`
         + ` label="${sel.label}"`
         + (failed ? ` err=${truncate(zipState.lastCaptureError, 60)}` : "");
       return captured;
     }
 
-    zipState.lastDiag = `dl: labels=${sel.labels} pm=${sel.promptMatches} ab=${sel.aboveBoundary} clicked=${sel.clicked}`;
+    zipState.lastDiag = `dl: labels=${sel.labels} pm=${sel.promptMatches} clicked=${sel.clicked}`;
     return sel.clicked;
   }
 
