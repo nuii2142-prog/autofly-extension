@@ -1221,7 +1221,16 @@
         matched = true;
         labelText = labels[i].text.slice(0, 40);
         const top = labels[i].top - 20;
-        const bottom = i + 1 < labels.length ? labels[i + 1].top : Infinity;
+        // Extend the band to the next DIFFERENT batch. The prompt text repeats in
+        // several adjacent elements (header + hidden/sidebar copies), so bounding
+        // at the immediate next label would clip this batch's grid (only 2 of 4).
+        let bottom = Infinity;
+        for (let j = i + 1; j < labels.length; j += 1) {
+          if (!labelMatchesPrompt(labels[j].text, promptText)) {
+            bottom = labels[j].top;
+            break;
+          }
+        }
         const band = candidates.filter((item) => {
           const y = item.element.getBoundingClientRect().top;
           return y >= top && y < bottom;
