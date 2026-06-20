@@ -1193,20 +1193,30 @@
       return { success: true, count: 0 };
     }
 
+    // Dedup by content: the same generated image can be captured more than once
+    // (e.g. a batch download control re-downloads a whole batch, each time via a
+    // fresh blob URL that URL-dedup can't catch). Collapsing byte-identical
+    // images by CRC32+size guarantees each image appears in the archive once.
+    const seen = new Set();
+    const unique = [];
+    for (const record of records) {
+      const bytes = new Uint8Array(await record.blob.arrayBuffer());
+      const key = `${ZipWriter.crc32(bytes)}:${bytes.length}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      unique.push({ name: record.name, type: record.type, bytes });
+    }
+
     const names = ZipCapture.dedupeEntryNames(
-      records.map((record, index) =>
+      unique.map((item, index) =>
         ZipCapture.sanitizeEntryName(
-          record.name,
-          `image-${String(index + 1).padStart(3, "0")}${ZipCapture.extensionFromMime(record.type)}`
+          item.name,
+          `image-${String(index + 1).padStart(3, "0")}${ZipCapture.extensionFromMime(item.type)}`
         )
       )
     );
 
-    const entries = [];
-    for (let i = 0; i < records.length; i += 1) {
-      const buffer = await records[i].blob.arrayBuffer();
-      entries.push({ name: names[i], data: new Uint8Array(buffer) });
-    }
+    const entries = unique.map((item, index) => ({ name: names[index], data: item.bytes }));
 
     const zipBytes = ZipWriter.buildZip(entries);
     const blob = new Blob([zipBytes], { type: "application/zip" });
@@ -1216,7 +1226,7 @@
     // can rebuild the archive on demand; they are cleared when the next run
     // starts (ensureZipRun) under a new runId.
 
-    return { success: true, count: entries.length, filename };
+    return { success: true, count: entries.length, filename, duplicates: records.length - unique.length };
   }
 
   // All visible, enabled download controls on the page, sorted newest-first

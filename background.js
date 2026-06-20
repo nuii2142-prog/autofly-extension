@@ -384,7 +384,10 @@ async function finalizeRunZip(options) {
     return { success: true, count: 0 };
   }
 
-  addLog(`Saved ZIP: ${response.filename} (${response.count} image${response.count > 1 ? "s" : ""})`);
+  const dupNote = response.duplicates
+    ? `, ${response.duplicates} duplicate${response.duplicates > 1 ? "s" : ""} removed`
+    : "";
+  addLog(`Saved ZIP: ${response.filename} (${response.count} image${response.count > 1 ? "s" : ""}${dupNote})`);
   await saveAndBroadcast();
   return { success: true, count: response.count, filename: response.filename };
 }

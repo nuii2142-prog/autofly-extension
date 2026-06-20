@@ -16,7 +16,7 @@ async function playCompletion(tone) {
       const stored = await chrome.storage.local.get("nuiiCustomSound");
       const custom = stored && stored.nuiiCustomSound;
       if (custom && custom.dataUrl) {
-        await new Audio(custom.dataUrl).play();
+        await playDataUrl(custom.dataUrl);
         return;
       }
     } catch (error) {
@@ -24,6 +24,31 @@ async function playCompletion(tone) {
     }
   }
   playChime(tone);
+}
+
+// Play an uploaded sound through the Web Audio API. This mirrors the chime path,
+// which is known to work in this offscreen document; HTMLAudioElement.play() is
+// blocked by the autoplay policy here (which is why the upload fell back before).
+async function playDataUrl(dataUrl) {
+  const AudioCtx = self.AudioContext || self.webkitAudioContext;
+  if (!AudioCtx) throw new Error("AudioContext unavailable");
+
+  const ctx = new AudioCtx();
+  try {
+    const response = await fetch(dataUrl);
+    const arrayBuffer = await response.arrayBuffer();
+    const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+    const source = ctx.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(ctx.destination);
+    source.start();
+    await new Promise((resolve) => {
+      source.onended = resolve;
+      setTimeout(resolve, (audioBuffer.duration + 1) * 1000);
+    });
+  } finally {
+    ctx.close().catch(() => {});
+  }
 }
 
 function playChime(tone) {

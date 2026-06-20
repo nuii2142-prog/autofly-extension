@@ -217,6 +217,20 @@ off-by-default option.
   re-render). Count-independent; never re-grabs old batches; also recovers the
   N=0 prompts. New diag: `zip: candidates=.. known=.. fresh=.. strat=.. ...`.
 
+## Duplicate-capture fix (content dedup) + sound fix (2026-06-20)
+
+- **Duplicate images in the ZIP (Firefly Image 4):** the screenshot showed exact
+  CRC32 duplicates (`...12165 (2).jpg` == `...12165.jpg`). Image 4's download
+  control re-downloads a whole batch and each click mints a fresh blob URL, so
+  URL-dedup missed them. Fix: `finalizeZip` now dedups by **content** (CRC32+size)
+  so each generated image appears once regardless of how often it was clicked;
+  the background logs `(N images, M duplicates removed)`. Snapshot-diff still
+  scopes clicking; content-dedup guarantees the archive is correct.
+- **Custom sound fell back to the chime:** offscreen `new Audio(dataUrl).play()`
+  is blocked by the autoplay policy in the offscreen document. Fixed by playing
+  the uploaded sound through the Web Audio API (`decodeAudioData` + buffer
+  source), the same path the working chime uses.
+
 ## Follow-on features added
 
 - **App icons** (`icons/*`) generated from `design/icon-source-chosen.jpeg`,
