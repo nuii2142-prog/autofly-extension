@@ -15,6 +15,11 @@ unit tests cannot cover. Internal identifiers still use the legacy "autofly"
 token on purpose (storage key, IndexedDB name, content-ready guard) to avoid
 orphaning stored data.
 
+App icons live in `icons/icon-{16,32,48,128}.png` (wired via manifest `icons` +
+`action.default_icon`). They are generated from `design/icon-source-chosen.jpeg`
+(regenerate with the System.Drawing PowerShell snippet if the source changes);
+`design/icon-source-alt.jpeg` is the runner-up source kept for reference.
+
 ## Hard Rules
 
 - Keep the extension loadable as an unpacked folder with no build step.

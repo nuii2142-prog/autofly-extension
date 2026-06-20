@@ -186,6 +186,12 @@ off-by-default option.
   and logs `res: set 2K [...]` / `res: NOT-confirmed ... [candidates]`.
 - Confirm on the next Image 5 run via `res: set 2K`. If still failing, the
   `[candidates]` list in the diagnostic shows the real DOM to refine against.
+- STILL UNVERIFIED as of the 2026-06-20T04:02 log: that run was the **older
+  build** (its `res:` line was the old testid format `[EDITIMAGE,...]`, not the
+  new `TAG:text@res` format), so the value-text rewrite was not exercised — the
+  user had not reloaded the extension. The images may have come out 2K anyway
+  because Firefly appears to remember a manually-set 2K across reloads; our code
+  should still control it. Action: reload, run Image 5, check `res: set 2K`.
 
 **Resolved / not-a-bug:**
 - Firefly Image 5 generating 1 image per prompt is normal (user confirmed) — no
