@@ -217,6 +217,14 @@ off-by-default option.
   re-render). Count-independent; never re-grabs old batches; also recovers the
   N=0 prompts. New diag: `zip: candidates=.. known=.. fresh=.. strat=.. ...`.
 
+## Follow-on features added
+
+- **App icons** (`icons/*`) generated from `design/icon-source-chosen.jpeg`,
+  wired into the manifest; popup header uses the icon.
+- **Custom completion sound**: popup upload (Upload/Test/Default), stored as a
+  data URL in `chrome.storage.local` (`nuiiCustomSound`, ≤1 MB); `offscreen.js`
+  plays it for the "complete" tone, falling back to the synth chime.
+
 ## Out of scope (YAGNI)
 
 - DEFLATE compression (STORE is sufficient for already-compressed images).

@@ -3,9 +3,28 @@
 // is generated with an oscillator so no binary audio asset is shipped.
 chrome.runtime.onMessage.addListener((message) => {
   if (message && message.action === "PLAY_COMPLETION_SOUND") {
-    playChime(message.tone === "error" ? "error" : "complete");
+    playCompletion(message.tone === "error" ? "error" : "complete");
   }
 });
+
+// A user-uploaded sound (stored as a data URL in chrome.storage.local under
+// "nuiiCustomSound") replaces the synthesized chime for the "complete" tone.
+// The error tone always uses the built-in chime. Any failure falls back to it.
+async function playCompletion(tone) {
+  if (tone === "complete") {
+    try {
+      const stored = await chrome.storage.local.get("nuiiCustomSound");
+      const custom = stored && stored.nuiiCustomSound;
+      if (custom && custom.dataUrl) {
+        await new Audio(custom.dataUrl).play();
+        return;
+      }
+    } catch (error) {
+      // Fall through to the built-in chime.
+    }
+  }
+  playChime(tone);
+}
 
 function playChime(tone) {
   try {

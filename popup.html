@@ -10,7 +10,7 @@
   <main class="app-shell">
     <header class="topbar">
       <div class="brand">
-        <div class="brand-mark" aria-hidden="true">NA</div>
+        <img class="brand-mark" src="icons/icon-48.png" alt="Nuii Auto Bulk" width="32" height="32">
         <div class="brand-copy">
           <h1>Nuii Auto Bulk</h1>
           <p id="active-target">No target tab</p>
@@ -173,6 +173,16 @@
           <span>Sound when finished</span>
           <input type="checkbox" id="sound-on-complete" checked>
         </label>
+      </div>
+
+      <div class="sound-custom">
+        <span class="sound-label">Completion sound: <strong id="sound-name">Default chime</strong></span>
+        <div class="sound-actions">
+          <button class="text-button" id="sound-upload" type="button">Upload</button>
+          <button class="text-button" id="sound-test" type="button">Test</button>
+          <button class="text-button" id="sound-reset" type="button">Default</button>
+        </div>
+        <input type="file" id="sound-file" accept="audio/*" hidden>
       </div>
     </section>
 

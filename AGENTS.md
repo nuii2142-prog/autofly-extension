@@ -20,6 +20,11 @@ App icons live in `icons/icon-{16,32,48,128}.png` (wired via manifest `icons` +
 (regenerate with the System.Drawing PowerShell snippet if the source changes);
 `design/icon-source-alt.jpeg` is the runner-up source kept for reference.
 
+Completion sound: the popup can upload a custom audio file, stored as a data URL
+in `chrome.storage.local` under `nuiiCustomSound`; `offscreen.js` plays it for the
+"complete" tone and falls back to the synthesized chime (error tone always uses
+the chime). Gated by the existing "Sound when finished" toggle.
+
 ## Hard Rules
 
 - Keep the extension loadable as an unpacked folder with no build step.

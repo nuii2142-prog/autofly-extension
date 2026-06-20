@@ -12,6 +12,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   bindElements();
   bindUiEvents();
   await loadDraft();
+  await initCustomSound();
   await refreshTarget();
   await requestState();
 
@@ -63,7 +64,12 @@ function bindElements() {
     "stop-btn",
     "activity-list",
     "download-zip-btn",
-    "export-log"
+    "export-log",
+    "sound-name",
+    "sound-upload",
+    "sound-test",
+    "sound-reset",
+    "sound-file"
   ].forEach((id) => {
     elements[toCamel(id)] = document.getElementById(id);
   });
@@ -138,6 +144,10 @@ function bindUiEvents() {
   elements.stopBtn.addEventListener("click", () => sendMessage({ action: "STOP_PROCESSING" }));
   elements.downloadZipBtn.addEventListener("click", handleDownloadZip);
   elements.exportLog.addEventListener("click", exportRunLog);
+  elements.soundUpload.addEventListener("click", () => elements.soundFile.click());
+  elements.soundFile.addEventListener("change", handleSoundFile);
+  elements.soundTest.addEventListener("click", testCustomSound);
+  elements.soundReset.addEventListener("click", resetCustomSound);
 
   chrome.runtime.onMessage.addListener((message) => {
     if (message.action === "STATE_UPDATE") {
@@ -558,6 +568,70 @@ function sendTabMessage(tabId, message) {
       resolve({ success: false, error: error.message });
     }
   });
+}
+
+const CUSTOM_SOUND_KEY = "nuiiCustomSound";
+const MAX_SOUND_BYTES = 1024 * 1024; // 1 MB is plenty for a notification sound.
+
+async function initCustomSound() {
+  const custom = await storageGet(CUSTOM_SOUND_KEY);
+  setSoundName(custom && custom.name);
+}
+
+function setSoundName(name) {
+  elements.soundName.textContent = name ? name : "Default chime";
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error || new Error("read failed"));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function handleSoundFile(event) {
+  const file = event.target.files && event.target.files[0];
+  event.target.value = ""; // allow re-picking the same file later
+  if (!file) return;
+
+  if (!/^audio\//i.test(file.type)) {
+    renderNotice("Please choose an audio file (.mp3, .wav, .ogg).");
+    return;
+  }
+  if (file.size > MAX_SOUND_BYTES) {
+    renderNotice(`That sound is too large (${Math.round(file.size / 1024)} KB). Max 1 MB.`);
+    return;
+  }
+
+  try {
+    const dataUrl = await readFileAsDataUrl(file);
+    await storageSet({ [CUSTOM_SOUND_KEY]: { name: file.name, dataUrl } });
+    setSoundName(file.name);
+    renderNotice(`Completion sound set: ${file.name}`);
+  } catch (error) {
+    renderNotice("Could not load that sound file.");
+  }
+}
+
+async function testCustomSound() {
+  const custom = await storageGet(CUSTOM_SOUND_KEY);
+  if (custom && custom.dataUrl) {
+    try {
+      await new Audio(custom.dataUrl).play();
+    } catch (error) {
+      renderNotice("Could not play the sound in this view.");
+    }
+  } else {
+    renderNotice("No custom sound set — the default chime will play.");
+  }
+}
+
+async function resetCustomSound() {
+  await new Promise((resolve) => chrome.storage.local.remove(CUSTOM_SOUND_KEY, () => resolve()));
+  setSoundName("");
+  renderNotice("Reverted to the default chime.");
 }
 
 function storageGet(key) {
