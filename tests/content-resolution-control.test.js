@@ -16,6 +16,17 @@ test("menuItemSelector targets the verified Firefly testid", () => {
   assert.equal(Resolution.menuItemSelector("1K"), '[data-testid="firefly-menu-item-1K"]');
 });
 
+test("RESOLUTION_PICKER_SELECTOR targets the verified Firefly Image 5 picker", () => {
+  // Empirically confirmed on the live page: the resolution control is an
+  // sp-picker carrying value="1K"/"2K"; the prior aria-label selector matched
+  // nothing, which is why setting 2K silently failed.
+  assert.equal(
+    Resolution.RESOLUTION_PICKER_SELECTOR,
+    'sp-picker[data-testid="firefly-picker-output-resolution"]'
+  );
+  assert.equal(Resolution.RESOLUTION_TRIGGER_SELECTORS[0], Resolution.RESOLUTION_PICKER_SELECTOR);
+});
+
 test("currentResolution returns the checked option, or null when none is checked", () => {
   assert.equal(
     Resolution.currentResolution([

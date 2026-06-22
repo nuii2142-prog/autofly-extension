@@ -116,12 +116,112 @@
     return `${summary.done || 0} done, ${summary.failed || 0} failed, ${images} image${images === 1 ? "" : "s"}, ${minutes}:${seconds}`;
   }
 
+  // A prompt entry is either a bare string or { prompt, sourcePrompt }. Reduce it
+  // to the { prompt, sourcePrompt } shape the queue stores.
+  function normalizeEntry(entry) {
+    if (entry && typeof entry === "object") {
+      const prompt = String(entry.prompt || "").trim();
+      return { prompt, sourcePrompt: String(entry.sourcePrompt || entry.prompt || "").trim() };
+    }
+    const prompt = String(entry || "").trim();
+    return { prompt, sourcePrompt: prompt };
+  }
+
+  // Build a flat queue from segments [{ name, prompts }]. Each item carries its
+  // segmentIndex; each segment gets its own runId so capture + finalize stay
+  // isolated per segment (one ZIP per file). `now` is passed in to keep this pure.
+  function buildSegmentedQueue(rawSegments, now) {
+    const base = Number(now) || 0;
+    const segments = [];
+    const queue = [];
+    let running = 0;
+    (rawSegments || []).forEach((seg, segIndex) => {
+      segments.push({
+        name: String((seg && seg.name) || `segment-${segIndex + 1}`),
+        runId: `${base}-s${segIndex}`
+      });
+      (((seg && seg.prompts) || [])).forEach((entry) => {
+        const { prompt, sourcePrompt } = normalizeEntry(entry);
+        if (!prompt) return;
+        queue.push({
+          id: `${base}-${running}`,
+          prompt,
+          sourcePrompt,
+          status: "pending",
+          attempts: 0,
+          error: "",
+          startedAt: null,
+          finishedAt: null,
+          segmentIndex: segIndex
+        });
+        running += 1;
+      });
+    });
+    return { queue, segments };
+  }
+
+  // A segment is complete once none of its items are still pending or running
+  // (every item is done or failed) — the cue to finalize that segment's ZIP.
+  function segmentComplete(queue, segmentIndex) {
+    const items = (queue || []).filter((item) => item && item.segmentIndex === segmentIndex);
+    if (!items.length) return false;
+    return items.every((item) => item.status === "done" || item.status === "failed");
+  }
+
+  // Consecutive-failure counter: reset on a success, +1 on a final failure, and
+  // unchanged on a retry (the item will come back around).
+  function nextFailureStreak(prevStreak, action) {
+    const prev = Number(prevStreak) || 0;
+    if (action === "done") return 0;
+    if (action === "failed") return prev + 1;
+    return prev;
+  }
+
+  function shouldPauseForFailures(streak, limit) {
+    return (Number(streak) || 0) >= (Number(limit) || 0);
+  }
+
+  // <fileStem>-<timestamp>.zip with filesystem-unsafe runs collapsed to "_".
+  function zipNameForSegment(name, timestamp) {
+    const clean = String(name == null ? "" : name)
+      .trim()
+      .replace(/[^a-zA-Z0-9_-]+/g, "_")
+      .replace(/^_+|_+$/g, "");
+    return `${clean || "segment"}-${timestamp}.zip`;
+  }
+
+  // Collect the run's failed items back into segments (grouped by their original
+  // segment, order preserved) so "Re-run failed" produces the same per-file ZIPs.
+  function failedItemsToSegments(queue, segments) {
+    const byIndex = new Map();
+    (queue || []).forEach((item) => {
+      if (!item || item.status !== "failed") return;
+      if (!byIndex.has(item.segmentIndex)) byIndex.set(item.segmentIndex, []);
+      byIndex.get(item.segmentIndex).push({
+        prompt: String(item.prompt || item.sourcePrompt || "").trim(),
+        sourcePrompt: String(item.sourcePrompt || item.prompt || "").trim()
+      });
+    });
+    return [...byIndex.keys()]
+      .sort((a, b) => a - b)
+      .map((segIndex) => ({
+        name: String(((segments || [])[segIndex] || {}).name || `segment-${segIndex + 1}`),
+        prompts: byIndex.get(segIndex)
+      }));
+  }
+
   const api = {
     applyPromptResultToItem,
     canStartNewRun,
     computeStats,
     recoverRunningItemsAfterRestart,
-    formatRunSummary
+    formatRunSummary,
+    buildSegmentedQueue,
+    segmentComplete,
+    nextFailureStreak,
+    shouldPauseForFailures,
+    zipNameForSegment,
+    failedItemsToSegments
   };
 
   root.NuiiBackgroundQueueState = api;

@@ -12,6 +12,9 @@ const LOG_LIMIT = 80;
 // Reload the Firefly tab after this many Generate clicks (and once at run
 // start) so the results feed stays small enough for reliable detection.
 const FIREFLY_REFRESH_EVERY = 10;
+// Consecutive prompt failures that trip a pause (likely an expired Firefly
+// session on a long unattended run) so the rest of the queue is not burned.
+const FAILURE_STREAK_LIMIT = 5;
 
 const DEFAULT_SETTINGS = globalThis.NuiiShared.DEFAULT_SETTINGS;
 const RoutePolicy = globalThis.NuiiBackgroundRoutePolicy;
@@ -25,7 +28,8 @@ const CONTROL_ACTIONS = new Set([
   "PAUSE_PROCESSING",
   "RESUME_PROCESSING",
   "STOP_PROCESSING",
-  "DOWNLOAD_ALL_ZIP"
+  "DOWNLOAD_ALL_ZIP",
+  "RERUN_FAILED"
 ]);
 
 const DEFAULT_STATE = {
@@ -40,6 +44,9 @@ const DEFAULT_STATE = {
   waitingForResult: false,
   promptsSinceRefresh: 0,
   runId: null,
+  segments: [],
+  failureStreak: 0,
+  finalizedSegments: [],
   zipFinalized: false,
   startedAt: null,
   finishedAt: null,
@@ -125,6 +132,23 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return;
     }
 
+    if (request.action === "RERUN_FAILED") {
+      const failedSegments = QueueState.failedItemsToSegments(appState.queue, appState.segments);
+      if (!failedSegments.length) {
+        sendResponse({ success: false, error: "No failed prompts to re-run" });
+        return;
+      }
+      const result = startProcessing({
+        segments: failedSegments,
+        settings: appState.settings,
+        targetTabId: appState.targetTabId,
+        targetUrl: appState.targetUrl,
+        targetTitle: appState.targetTitle
+      });
+      sendResponse({ ...result, state: publicState() });
+      return;
+    }
+
     sendResponse({ success: false, error: "Unknown action" });
   })().catch((error) => {
     console.error("[Nuii Auto Bulk] Message error:", error);
@@ -143,27 +167,25 @@ function startProcessing(request) {
     return { success: false, error: startCheck.reason };
   }
 
-  const prompts = Array.isArray(request.prompts) ? request.prompts : [];
-  const requestItems = Array.isArray(request.items) && request.items.length
-    ? request.items
-    : prompts.map((prompt) => ({ prompt, sourcePrompt: prompt }));
+  const now = Date.now();
+  // Unify all inputs to segments: multi-file callers send { segments }; legacy
+  // callers send { items }/{ prompts } which become one implicit segment.
+  const rawSegments = Array.isArray(request.segments) && request.segments.length
+    ? request.segments
+    : [{
+        name: "prompts",
+        prompts: Array.isArray(request.items) && request.items.length
+          ? request.items
+          : (Array.isArray(request.prompts) ? request.prompts : [])
+      }];
+  const { queue, segments } = QueueState.buildSegmentedQueue(rawSegments, now);
   const settings = sanitizeSettings(request.settings || {});
 
   appState = {
     ...clone(DEFAULT_STATE),
     status: "Running",
-    queue: requestItems
-      .map((item, index) => ({
-        id: `${Date.now()}-${index}`,
-        prompt: String(item.prompt || "").trim(),
-        sourcePrompt: String(item.sourcePrompt || item.prompt || "").trim(),
-        status: "pending",
-        attempts: 0,
-        error: "",
-        startedAt: null,
-        finishedAt: null
-      }))
-      .filter((item) => item.prompt),
+    queue,
+    segments,
     settings,
     targetTabId: request.targetTabId || null,
     targetUrl: request.targetUrl || "",
@@ -171,14 +193,23 @@ function startProcessing(request) {
     // Seed at the threshold so the first prompt refreshes the page, clearing
     // any batches left over from a previous run on the same tab.
     promptsSinceRefresh: FIREFLY_REFRESH_EVERY,
-    runId: String(Date.now()),
-    startedAt: Date.now(),
+    // appState.runId tracks the CURRENT segment's runId; processQueue advances it
+    // per item so capture + finalize land in the right per-segment IDB run.
+    runId: segments.length ? segments[0].runId : String(now),
+    startedAt: now,
+    failureStreak: 0,
+    finalizedSegments: [],
     logs: []
   };
 
+  if (!queue.length) {
+    appState.status = "Idle";
+    return { success: false, error: "No prompts to run" };
+  }
+
   stopRequested = false;
   startWorkerKeepAlive();
-  addLog(`Loaded ${appState.queue.length} prompts`);
+  addLog(`Loaded ${queue.length} prompt${queue.length === 1 ? "" : "s"}${segments.length > 1 ? ` across ${segments.length} files` : ""}`);
   if (settings.platform === "firefly") {
     addLog(`Resolution target for this run: ${settings.resolution}`);
   }
@@ -257,6 +288,10 @@ async function processQueue() {
       item.startedAt = Date.now();
       item.submittedAt = null;
       item.error = "";
+      // Point capture + finalize at this item's segment IDB run.
+      if (appState.segments[item.segmentIndex]) {
+        appState.runId = appState.segments[item.segmentIndex].runId;
+      }
       appState.currentPrompt = item.prompt;
       appState.currentItemId = item.id;
       appState.lastError = "";
@@ -306,6 +341,37 @@ async function processQueue() {
         }
       }
 
+      appState.failureStreak = QueueState.nextFailureStreak(appState.failureStreak, transition.action);
+
+      // Multi-file run: a finished segment gets its own ZIP at the boundary
+      // (auto-downloaded — the run is unattended). The next segment's first
+      // submit clears the previous segment's IDB via its new runId.
+      if (
+        appState.segments.length > 1 &&
+        QueueState.segmentComplete(appState.queue, item.segmentIndex) &&
+        !appState.finalizedSegments.includes(item.segmentIndex)
+      ) {
+        appState.finalizedSegments.push(item.segmentIndex);
+        const segment = appState.segments[item.segmentIndex];
+        addLog(`Segment done: ${segment.name} — building ZIP`);
+        await finalizeRunZip({ segment, forceDownload: true });
+      }
+
+      // Failure streak likely means the Firefly session expired; pause and let
+      // the user log in and Resume rather than burning the rest of the queue.
+      if (QueueState.shouldPauseForFailures(appState.failureStreak, FAILURE_STREAK_LIMIT) && appState.status === "Running") {
+        appState.status = "Paused";
+        appState.failureStreak = 0;
+        appState.currentPrompt = "";
+        appState.currentItemId = null;
+        appState.waitingForResult = false;
+        stopWorkerKeepAlive();
+        addLog(`Paused: ${FAILURE_STREAK_LIMIT} prompts failed in a row — Firefly session may have expired. Log in and click Resume.`);
+        await saveAndBroadcast();
+        await playCompletionSound("error");
+        break;
+      }
+
       appState.currentPrompt = "";
       appState.currentItemId = null;
       await saveAndBroadcast();
@@ -329,7 +395,9 @@ async function processQueue() {
     const terminal = appState.status === "Complete"
       || appState.status === "Stopped"
       || appState.status === "Error";
-    if (terminal) {
+    // Single-segment runs finalize the whole-run ZIP here (legacy behaviour).
+    // Multi-segment runs already finalized each segment at its boundary.
+    if (terminal && appState.segments.length <= 1) {
       await finalizeRunZip();
     }
     queueLoopRunning = false;
@@ -345,8 +413,14 @@ async function processQueue() {
 // and only in ZIP mode; the manual "Download all as ZIP" button passes
 // { manual: true } to rebuild on demand regardless of those guards.
 async function finalizeRunZip(options) {
-  const manual = Boolean(options && options.manual);
-  if (!manual) {
+  const opts = options || {};
+  const manual = Boolean(opts.manual);
+  // A specific segment of a multi-file run: always auto-download (unattended)
+  // and skip the whole-run zipFinalized / manual-click guards.
+  const segment = opts.segment || null;
+  const forceDownload = Boolean(opts.forceDownload);
+
+  if (!manual && !forceDownload) {
     if (appState.zipFinalized) return { success: true, skipped: true };
     if (!appState.settings.zipDownload) return { success: true, skipped: true };
     appState.zipFinalized = true;
@@ -358,6 +432,8 @@ async function finalizeRunZip(options) {
       await saveAndBroadcast();
       return { success: true, skipped: true };
     }
+  } else if (forceDownload && !appState.settings.zipDownload) {
+    return { success: true, skipped: true };
   }
 
   const tabId = await findFireflyTabId();
@@ -374,9 +450,13 @@ async function finalizeRunZip(options) {
     return { success: false, error };
   }
 
+  const ts = new Date();
+  const pad = (value) => String(value).padStart(2, "0");
+  const stamp = `${ts.getFullYear()}${pad(ts.getMonth() + 1)}${pad(ts.getDate())}-${pad(ts.getHours())}${pad(ts.getMinutes())}${pad(ts.getSeconds())}`;
   const response = await sendTabMessage(tabId, {
     action: "FINALIZE_ZIP",
-    runId: appState.runId
+    runId: segment ? segment.runId : appState.runId,
+    zipName: segment ? QueueState.zipNameForSegment(segment.name, stamp) : null
   });
 
   if (!response || !response.success) {
@@ -1158,6 +1238,12 @@ function addRunSummary() {
   );
   const elapsedMs = appState.startedAt ? Date.now() - appState.startedAt : 0;
   addLog(`Run summary: ${QueueState.formatRunSummary(computeStats(), downloads, elapsedMs)}`);
+  // Surface the total run time as its own labelled line and a structured field on
+  // the exported state, so it is easy to read off / quote without parsing the
+  // summary string.
+  appState.runDurationMs = elapsedMs;
+  appState.runDurationText = formatDuration(elapsedMs);
+  addLog(`Total run time: ${appState.runDurationText}`);
 }
 
 function addWaitDiagnostics(diag) {
@@ -1190,6 +1276,16 @@ function truncate(value, length) {
   const text = String(value || "");
   if (text.length <= length) return text;
   return `${text.slice(0, length - 1)}...`;
+}
+
+// Whole-run elapsed time as H:MM:SS (drops the hours field when under an hour).
+function formatDuration(ms) {
+  const total = Math.max(0, Math.round(Number(ms) / 1000));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const pad = (n) => String(n).padStart(2, "0");
+  return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
 }
 
 function normalizeText(value) {

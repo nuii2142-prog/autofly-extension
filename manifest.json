@@ -25,6 +25,12 @@
   "content_scripts": [
     {
       "matches": ["https://firefly.adobe.com/*"],
+      "js": ["src/content/firefly-network-hook.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://firefly.adobe.com/*"],
       "js": [
         "src/shared/text.js",
         "src/shared/message.js",

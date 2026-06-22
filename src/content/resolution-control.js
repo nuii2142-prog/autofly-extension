@@ -1,16 +1,22 @@
 (function attachResolutionControl(root) {
-  // Firefly exposes resolution as a single-select Spectrum menu. Each option is
-  // an <sp-menu-item data-testid="firefly-menu-item-<value>" role="menuitemradio"
-  // aria-checked="true|false">. A full page reload resets the selection to the
-  // 1K default, so the runner must re-apply the desired value before every
-  // Generate. These helpers stay DOM-free so they can be unit tested.
+  // Firefly exposes resolution as an sp-picker that carries the current selection
+  // in its `value` attribute ("1K"/"2K"); each option is an
+  // <sp-menu-item data-testid="firefly-menu-item-<value>" role="option">. Reading
+  // the picker's value is exact, so the runner does not infer the selection from
+  // menu-item state. A full page reload resets the picker to the 1K default, so
+  // the runner re-applies the desired value before every Generate. Models without
+  // a resolution control (e.g. Firefly Image 4, fixed size) have no such picker.
+  // These helpers stay DOM-free so they can be unit tested.
   const RESOLUTION_VALUES = ["1K", "2K"];
   const DEFAULT_RESOLUTION = "2K";
 
-  // Option items, always present in the picker. The trigger opens the menu when
-  // the options are not yet rendered/visible (closed picker after a reload).
+  // The resolution picker itself (stable testid). Its `value` attribute holds the
+  // current selection; clicking it opens the 1K/2K options.
+  const RESOLUTION_PICKER_SELECTOR = 'sp-picker[data-testid="firefly-picker-output-resolution"]';
+  // Option items, present in the DOM but only visible once the picker is open.
   const RESOLUTION_ITEM_SELECTOR = '[data-testid^="firefly-menu-item-"]';
   const RESOLUTION_TRIGGER_SELECTORS = [
+    RESOLUTION_PICKER_SELECTOR,
     'sp-picker[aria-label="Resolution"]',
     'sp-picker[label="Resolution"]',
     '[role="button"][aria-label="Resolution"]',
@@ -67,6 +73,7 @@
   const api = {
     RESOLUTION_VALUES,
     DEFAULT_RESOLUTION,
+    RESOLUTION_PICKER_SELECTOR,
     RESOLUTION_ITEM_SELECTOR,
     RESOLUTION_TRIGGER_SELECTORS,
     isSupportedResolution,

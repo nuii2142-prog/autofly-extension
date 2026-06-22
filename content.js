@@ -83,7 +83,7 @@
     }
 
     if (request.action === "FINALIZE_ZIP") {
-      finalizeZip(request.runId)
+      finalizeZip(request.runId, request.zipName)
         .then(sendResponse)
         .catch((error) => sendResponse({ success: false, error: error.message }));
       return true;
@@ -96,7 +96,13 @@
     const startedAt = Date.now();
     await preferGridView();
     const resolution = await applyResolution(settings.resolution);
-    const input = await waitFor(() => findPromptInput(), 12000, 250);
+    // The runner reloads the Firefly tab every FIREFLY_REFRESH_EVERY prompts, and
+    // Firefly's SPA can take ~15-20s to re-render the prompt box after a reload.
+    // A 12s wait sometimes lost that race -> "Prompt input not found" on the
+    // prompt right after a refresh. 25s covers the slow post-reload case; when the
+    // input is already present (the common case) waitFor returns on the first poll,
+    // so the happy path is not slowed.
+    const input = await waitFor(() => findPromptInput(), 25000, 250);
 
     if (!input) {
       return { success: false, error: "Prompt input not found" };
@@ -132,9 +138,11 @@
       rect: elementRect(item.element)
     }));
 
-    // Clear a new run's stored images before generation. Download scoping is
-    // anchored to each prompt's own result-batch label (see downloadPromptBatch).
+    // Arm ZIP capture before generation so the result-poll network response (the
+    // batch's presigned image URLs) is caught the moment it arrives. Clears a new
+    // run's stored images on runId change.
     if (settings.zipDownload) {
+      zipState.currentPrompt = prompt;
       await ensureZipRun(settings.runId);
     }
 
@@ -184,6 +192,41 @@
       return { applied: false, reason: "unsupported", target: target || null };
     }
     const wanted = ResolutionControl.normalizeResolution(target);
+
+    // Fast, exact path: Firefly Image 5+ exposes the resolution as an sp-picker
+    // whose `value` attribute holds the current selection. Read and set it via
+    // stable testids — no text-token guessing. Models with no such picker
+    // (e.g. Firefly Image 4, fixed size) fall through to the heuristic below.
+    const resPicker = firstVisible(deepQuerySelectorAll(ResolutionControl.RESOLUTION_PICKER_SELECTOR));
+    if (resPicker) {
+      const pickerValue = () => ResolutionControl.normalizeResolution(resPicker.getAttribute("value") || "");
+      if (pickerValue() === wanted) {
+        lastResolutionDiag = `res: already ${wanted} (picker)`;
+        return { applied: true, already: true, resolution: wanted };
+      }
+      let tries = 0;
+      while (tries < 3) {
+        tries += 1;
+        clickElement(resPicker);
+        const option = await waitFor(
+          () => firstVisible(deepQuerySelectorAll(ResolutionControl.menuItemSelector(wanted))),
+          2200,
+          150
+        );
+        if (!option) {
+          await sleep(300);
+          continue;
+        }
+        clickElement(option);
+        if (await waitFor(() => (pickerValue() === wanted ? true : null), 2500, 150)) {
+          lastResolutionDiag = `res: set ${wanted} via picker (attempt ${tries})`;
+          console.log(`[Nuii Auto Bulk] Resolution set to ${wanted}.`);
+          return { applied: true, resolution: wanted };
+        }
+      }
+      lastResolutionDiag = `res: NOT-confirmed ${wanted} via picker (attempts ${tries})`;
+      return { applied: false, reason: "selection-not-confirmed", target: wanted };
+    }
 
     // Elements that display a bare 1K/2K value. Only the resolution control does
     // this, so the token isolates it from the model and aspect-ratio pickers.
@@ -997,15 +1040,57 @@
   const ZIP_META_STORE = "meta";
 
   const zipState = {
-    hookInstalled: false,
     active: false,
     runId: null,
+    currentPrompt: "",
     pending: [],
     capturedHrefs: new Set(),
     lastDiag: "",
-    lastCaptureError: "",
-    intercepts: 0
+    lastCaptureError: ""
   };
+
+  // Bridge from the MAIN-world network hook (src/content/firefly-network-hook.js).
+  // Each generation's result poll yields the batch's full-resolution presigned
+  // image URLs; we capture them straight into the run's ZIP set. This is the
+  // authoritative source (exact batch size, stable ids) and replaces the old
+  // DOM-scrape + download-click capture.
+  window.addEventListener("message", (event) => {
+    if (event.source !== window) return;
+    const data = event.data;
+    if (!data || data.source !== "nuii-ff-capture" || !Array.isArray(data.outputs)) return;
+    if (!zipState.active || !zipState.runId) return;
+    for (const out of data.outputs) {
+      if (!out || !out.url || zipState.capturedHrefs.has(out.url)) continue;
+      zipState.capturedHrefs.add(out.url);
+      zipState.pending.push(captureNetworkImage(out));
+    }
+  });
+
+  // Presigned S3 URLs are self-authenticating; sending cookies trips S3's CORS
+  // (Allow-Origin:* is rejected with credentials), so fetch without credentials.
+  async function captureNetworkImage(out) {
+    try {
+      const runId = zipState.runId;
+      if (!runId) return false;
+      const response = await fetch(out.url);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const blob = await response.blob();
+      const type = blob.type || "image/jpeg";
+      const tail = out.seed != null ? out.seed : (out.id || "").slice(0, 8);
+      const base = zipState.currentPrompt ? `${zipState.currentPrompt} ${tail}` : (out.id || "image");
+      const name = ZipCapture.sanitizeEntryName(
+        base + ZipCapture.extensionFromMime(type),
+        "image" + ZipCapture.extensionFromMime(type)
+      );
+      await idbPutImage({ runId, name, type, blob });
+      console.log(`[Nuii Auto Bulk] Captured image for ZIP (network): ${name} (${blob.size} bytes)`);
+      return true;
+    } catch (error) {
+      zipState.lastCaptureError = (error && error.message) || "unknown";
+      console.warn("[Nuii Auto Bulk] ZIP network capture failed:", zipState.lastCaptureError);
+      return false;
+    }
+  }
 
   function openZipDb() {
     return new Promise((resolve, reject) => {
@@ -1090,6 +1175,7 @@
   // mid-run tab refresh (which re-injects this script) does not wipe the run.
   async function ensureZipRun(runId) {
     if (!runId) return;
+    zipState.active = true;
     if (zipState.runId !== runId) {
       const stored = await idbGetMeta("currentRunId");
       if (stored !== runId) {
@@ -1190,67 +1276,6 @@
     return { matched, clicked: buttons.length, label: labelText, ...stats };
   }
 
-  function anchorFromEvent(event) {
-    const path = typeof event.composedPath === "function" ? event.composedPath() : [];
-    for (const node of path) {
-      if (node && node.tagName === "A") return node;
-    }
-    return event.target && event.target.closest ? event.target.closest("a") : null;
-  }
-
-  function isCapturableAnchor(anchor) {
-    if (!anchor) return false;
-    if (anchor.hasAttribute("data-nuii-zip")) return false; // our own ZIP download
-    const href = anchor.getAttribute("href") || anchor.href || "";
-    if (!href || /^javascript:/i.test(href)) return false;
-    const hasDownload = anchor.hasAttribute("download");
-    const looksDownloadable = /^(blob:|data:|https?:)/i.test(href);
-    return hasDownload || looksDownloadable;
-  }
-
-  function installDownloadHook() {
-    if (zipState.hookInstalled) return;
-    document.addEventListener("click", onDownloadClickCapture, true);
-    zipState.hookInstalled = true;
-  }
-
-  function onDownloadClickCapture(event) {
-    if (!zipState.active) return;
-    const anchor = anchorFromEvent(event);
-    if (!isCapturableAnchor(anchor)) return;
-
-    const href = anchor.href || anchor.getAttribute("href");
-    const downloadName = anchor.getAttribute("download") || "";
-
-    // Divert Firefly's own download: cancel the default action so the file does
-    // not hit disk, then stash its bytes for the run-end ZIP. Propagation is
-    // left intact so Firefly's own click handlers still run normally.
-    event.preventDefault();
-    zipState.intercepts += 1;
-    if (zipState.capturedHrefs.has(href)) return; // already captured this image
-    zipState.capturedHrefs.add(href);
-    zipState.pending.push(captureDownload(href, downloadName));
-  }
-
-  async function captureDownload(href, downloadName) {
-    try {
-      const runId = zipState.runId;
-      if (!runId) return false;
-      const response = await fetch(href, { credentials: "include" });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const blob = await response.blob();
-      const type = blob.type || "";
-      const name = ZipCapture.sanitizeEntryName(downloadName, "image" + ZipCapture.extensionFromMime(type));
-      await idbPutImage({ runId, name, type, blob });
-      console.log(`[Nuii Auto Bulk] Captured image for ZIP: ${name} (${blob.size} bytes)`);
-      return true;
-    } catch (error) {
-      zipState.lastCaptureError = (error && error.message) || "unknown";
-      console.warn("[Nuii Auto Bulk] ZIP capture failed:", zipState.lastCaptureError, href);
-      return false;
-    }
-  }
-
   function zipTimestamp() {
     const now = new Date();
     const pad = (value) => String(value).padStart(2, "0");
@@ -1275,7 +1300,7 @@
     }, 4000);
   }
 
-  async function finalizeZip(runId) {
+  async function finalizeZip(runId, zipName) {
     zipState.active = false;
     const targetRun = runId || zipState.runId;
 
@@ -1311,7 +1336,7 @@
 
     const zipBytes = ZipWriter.buildZip(entries);
     const blob = new Blob([zipBytes], { type: "application/zip" });
-    const filename = `nuii-auto-bulk-${zipTimestamp()}.zip`;
+    const filename = zipName || `nuii-auto-bulk-${zipTimestamp()}.zip`;
     triggerZipDownload(blob, filename);
     // Keep the captured images in IndexedDB so the "Download all as ZIP" button
     // can rebuild the archive on demand; they are cleared when the next run
@@ -1344,33 +1369,30 @@
     const opts = settings || {};
     const zipMode = Boolean(opts.zipDownload);
 
-    zipState.active = zipMode;
     if (zipMode) {
-      installDownloadHook();
-      zipState.pending = [];
-      zipState.intercepts = 0;
-      zipState.lastCaptureError = "";
-    }
-
-    await sleep(1200);
-    const sel = await downloadPromptBatch(prompt || "");
-
-    if (zipMode) {
-      // Give Firefly time to create and click its download anchors so the hook
-      // can intercept them, then wait for every fetch + IndexedDB write.
-      await sleep(2500);
+      // ZIP capture now comes from the generation result network response
+      // (outputs[].image.presignedUrl), forwarded by the MAIN-world hook and
+      // captured the instant the batch completes — during generation, before this
+      // runs. No scraping, no download-button clicking: just wait for this batch's
+      // captures to arrive and settle.
+      const deadline = Date.now() + 8000;
+      while (zipState.pending.length === 0 && Date.now() < deadline) {
+        await sleep(200);
+      }
       const results = await Promise.allSettled(zipState.pending);
       zipState.pending = [];
       const captured = results.filter((result) => result.status === "fulfilled" && result.value).length;
       const failed = results.length - captured;
       zipState.lastDiag =
-        `zip: labels=${sel.labels} pm=${sel.promptMatches} clicked=${sel.clicked}`
-        + ` intercepts=${zipState.intercepts} captured=${captured} failed=${failed}`
-        + ` label="${sel.label}"`
+        `zip(net): captured=${captured} failed=${failed}`
         + (failed ? ` err=${truncate(zipState.lastCaptureError, 60)}` : "");
       return captured;
     }
 
+    // autoDownload-to-disk (non-ZIP) is unchanged: click Firefly's own download
+    // controls scoped to this prompt's batch so each file lands on disk.
+    await sleep(1200);
+    const sel = await downloadPromptBatch(prompt || "");
     zipState.lastDiag = `dl: labels=${sel.labels} pm=${sel.promptMatches} clicked=${sel.clicked}`;
     return sel.clicked;
   }

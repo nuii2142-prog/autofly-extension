@@ -3,7 +3,7 @@ const PromptTools = globalThis.NuiiPopupPromptTools;
 
 const elements = {};
 let sourceMode = "paste";
-let uploadedText = "";
+let uploadedFiles = [];
 let activeTab = null;
 let lastState = null;
 let renderTimer = null;
@@ -31,6 +31,7 @@ function bindElements() {
     "stat-left",
     "prompt-count",
     "clear-prompts",
+    "rerun-failed",
     "source-paste",
     "source-file",
     "paste-view",
@@ -94,7 +95,7 @@ function bindUiEvents() {
   });
 
   elements.fileInput.addEventListener("change", (event) => {
-    handleFile(event.target.files && event.target.files[0]);
+    handleFiles(event.target.files);
   });
 
   ["dragenter", "dragover"].forEach((eventName) => {
@@ -112,7 +113,7 @@ function bindUiEvents() {
   });
 
   elements.dropZone.addEventListener("drop", (event) => {
-    handleFile(event.dataTransfer.files && event.dataTransfer.files[0]);
+    handleFiles(event.dataTransfer.files);
   });
 
   elements.delaySlider.addEventListener("input", () => {
@@ -144,6 +145,7 @@ function bindUiEvents() {
   elements.stopBtn.addEventListener("click", () => sendMessage({ action: "STOP_PROCESSING" }));
   elements.downloadZipBtn.addEventListener("click", handleDownloadZip);
   elements.exportLog.addEventListener("click", exportRunLog);
+  elements.rerunFailed.addEventListener("click", handleRerunFailed);
   elements.soundUpload.addEventListener("click", () => elements.soundFile.click());
   elements.soundFile.addEventListener("change", handleSoundFile);
   elements.soundTest.addEventListener("click", testCustomSound);
@@ -161,7 +163,7 @@ async function loadDraft() {
   const settings = { ...DEFAULT_SETTINGS, ...(draft && draft.settings) };
 
   elements.promptsTextarea.value = draft && draft.promptText ? draft.promptText : "";
-  uploadedText = draft && draft.uploadedText ? draft.uploadedText : "";
+  uploadedFiles = draft && Array.isArray(draft.uploadedFiles) ? draft.uploadedFiles : [];
   elements.promptPrefix.value = settings.prefix;
   elements.promptSuffix.value = settings.suffix;
   elements.dedupePrompts.checked = Boolean(settings.dedupe);
@@ -179,10 +181,8 @@ async function loadDraft() {
   elements.delayOutput.textContent = `${settings.delay}s`;
   elements.timeoutOutput.textContent = `${settings.timeout}s`;
 
-  if (uploadedText) {
-    const count = parsePrompts(uploadedText).length;
-    elements.fileTitle.textContent = "Saved file prompts";
-    elements.fileSubtitle.textContent = `${count} prompts loaded`;
+  if (uploadedFiles.length) {
+    renderFileSummary();
   }
 
   setSourceMode(draft && draft.sourceMode ? draft.sourceMode : "paste");
@@ -200,7 +200,7 @@ async function saveDraft() {
     popupDraft: {
       sourceMode,
       promptText: elements.promptsTextarea.value,
-      uploadedText,
+      uploadedFiles,
       settings
     }
   });
@@ -221,27 +221,43 @@ function onPromptInput() {
   saveDraftSoon();
 }
 
-async function handleFile(file) {
-  if (!file) return;
+async function handleFiles(fileList) {
+  const files = Array.from(fileList || []);
+  if (!files.length) return;
 
-  const text = await file.text();
-  uploadedText = text;
-  const count = parsePrompts(text).length;
-  elements.fileTitle.textContent = file.name;
-  elements.fileSubtitle.textContent = `${count} prompts loaded`;
+  uploadedFiles = await Promise.all(
+    files.map(async (file) => ({ name: file.name, text: await file.text() }))
+  );
   setSourceMode("file");
+  renderFileSummary();
   updatePromptCount();
   saveDraftSoon();
+}
+
+function renderFileSummary() {
+  if (!uploadedFiles.length) {
+    elements.fileTitle.textContent = "Drop .txt or .csv";
+    elements.fileSubtitle.textContent = "One or more files — one ZIP per file";
+    return;
+  }
+  const settings = readSettings();
+  const total = uploadedFiles.reduce(
+    (sum, file) => sum + PromptTools.parsePromptEntries(file.text, settings).length,
+    0
+  );
+  elements.fileTitle.textContent =
+    uploadedFiles.length === 1 ? uploadedFiles[0].name : `${uploadedFiles.length} files`;
+  elements.fileSubtitle.textContent =
+    `${total} prompt${total === 1 ? "" : "s"} • ${uploadedFiles.length} ZIP${uploadedFiles.length === 1 ? "" : "s"}`;
 }
 
 function clearPromptInput() {
   if (sourceMode === "paste") {
     elements.promptsTextarea.value = "";
   } else {
-    uploadedText = "";
+    uploadedFiles = [];
     elements.fileInput.value = "";
-    elements.fileTitle.textContent = "Drop .txt or .csv";
-    elements.fileSubtitle.textContent = "Prompt column or one prompt per line";
+    renderFileSummary();
   }
   updatePromptCount();
   saveDraftSoon();
@@ -292,8 +308,9 @@ async function handleStartOrResume() {
     return;
   }
 
-  const promptEntries = collectPromptEntries();
-  if (!promptEntries.length) {
+  const segments = collectSegments();
+  const totalPrompts = segments.reduce((sum, segment) => sum + segment.prompts.length, 0);
+  if (!totalPrompts) {
     renderNotice("Add prompts before starting.");
     return;
   }
@@ -308,8 +325,7 @@ async function handleStartOrResume() {
   await saveDraft();
   const response = await sendMessage({
     action: "START_PROCESSING",
-    items: promptEntries,
-    prompts: promptEntries.map((entry) => entry.prompt),
+    segments,
     settings,
     targetTabId: activeTab.id,
     targetUrl: activeTab.url || "",
@@ -337,14 +353,32 @@ async function handleDownloadZip() {
   }
 }
 
-function collectPrompts() {
-  return collectPromptEntries().map((entry) => entry.prompt);
+async function handleRerunFailed() {
+  const response = await sendMessage({ action: "RERUN_FAILED" });
+  if (response && response.success === false && response.error) {
+    renderNotice(response.error);
+  }
 }
 
-function collectPromptEntries() {
+function collectPrompts() {
+  return collectSegments().flatMap((segment) => segment.prompts.map((entry) => entry.prompt));
+}
+
+function fileStem(name) {
+  return String(name || "").replace(/\.[^.]+$/, "").trim() || "prompts";
+}
+
+// One segment per source: paste = a single "prompts" segment; file mode = one
+// segment per uploaded file (one ZIP each). Dedup applies within each segment.
+function collectSegments() {
   const settings = readSettings();
-  const sourceText = sourceMode === "paste" ? elements.promptsTextarea.value : uploadedText;
-  return PromptTools.parsePromptEntries(sourceText, settings);
+  if (sourceMode === "paste") {
+    const prompts = PromptTools.parsePromptEntries(elements.promptsTextarea.value, settings);
+    return prompts.length ? [{ name: "prompts", prompts }] : [];
+  }
+  return uploadedFiles
+    .map((file) => ({ name: fileStem(file.name), prompts: PromptTools.parsePromptEntries(file.text, settings) }))
+    .filter((segment) => segment.prompts.length);
 }
 
 function parsePrompts(text) {
@@ -377,6 +411,8 @@ function updatePromptCount() {
 
 function renderState(state) {
   lastState = state || {};
+  renderRunTimer();
+  updateRunTimerTicker(state.status);
   const stats = state.stats || computeStats(state.queue || []);
   const total = stats.total || 0;
   const completed = stats.done || 0;
@@ -402,6 +438,22 @@ function renderState(state) {
   elements.pauseBtn.disabled = !isRunning;
   elements.stopBtn.disabled = !isRunning && !isPaused;
   elements.downloadZipBtn.disabled = isRunning;
+
+  if (elements.rerunFailed) {
+    const canRerun = failed > 0 && !isRunning && !isPaused;
+    elements.rerunFailed.hidden = !canRerun;
+    elements.rerunFailed.textContent = `Re-run failed (${failed})`;
+  }
+
+  // Show which segment (file) is running for multi-file runs.
+  if (state.segments && state.segments.length > 1 && state.currentItemId) {
+    const current = (state.queue || []).find((item) => item.id === state.currentItemId);
+    const segment = current && state.segments[current.segmentIndex];
+    if (segment) {
+      elements.currentPrompt.textContent =
+        `[${current.segmentIndex + 1}/${state.segments.length} ${segment.name}] ${current.prompt || ""}`.slice(0, 110);
+    }
+  }
 
   if (state.settings && state.settings.autoDelete && sourceMode === "paste" && document.activeElement !== elements.promptsTextarea) {
     const pending = (state.queue || [])
@@ -487,6 +539,41 @@ function formatTime(value) {
   if (!value) return "--:--";
   const date = new Date(value);
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+// Whole-run elapsed clock for the popup: ticks live while Running, freezes at the
+// final total once the run Completes or is Stopped (both set finishedAt), and
+// shows the last run's total when idle so it stays available to read off later.
+let runTimerInterval = null;
+
+function formatDuration(ms) {
+  const total = Math.max(0, Math.round(Number(ms) / 1000));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const pad = (n) => String(n).padStart(2, "0");
+  return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
+}
+
+function renderRunTimer() {
+  const el = document.getElementById("run-timer");
+  if (!el) return;
+  const state = lastState || {};
+  if (!state.startedAt) {
+    el.textContent = "⏱ 00:00";
+    return;
+  }
+  const end = state.status === "Running" ? Date.now() : state.finishedAt || Date.now();
+  el.textContent = `⏱ ${formatDuration(end - state.startedAt)}`;
+}
+
+function updateRunTimerTicker(status) {
+  if (status === "Running") {
+    if (!runTimerInterval) runTimerInterval = setInterval(renderRunTimer, 1000);
+  } else if (runTimerInterval) {
+    clearInterval(runTimerInterval);
+    runTimerInterval = null;
+  }
 }
 
 function getHost(url) {

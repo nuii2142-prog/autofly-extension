@@ -79,9 +79,9 @@
             <path d="M12 3v12"></path>
           </svg>
           <span id="file-title">Drop .txt or .csv</span>
-          <small id="file-subtitle">Prompt column or one prompt per line</small>
+          <small id="file-subtitle">One or more files — one ZIP per file</small>
         </label>
-        <input type="file" id="file-input" accept=".txt,.csv,text/plain,text/csv" hidden>
+        <input type="file" id="file-input" accept=".txt,.csv,text/plain,text/csv" multiple hidden>
       </div>
 
       <div class="prompt-tools">
@@ -189,7 +189,10 @@
     <section class="run-panel" aria-label="Run controls">
       <div class="progress-head">
         <span id="current-prompt">Ready</span>
-        <strong id="progress-label">0%</strong>
+        <span class="progress-meta" style="display:flex; gap:12px; align-items:center;">
+          <strong id="run-timer" title="Total run time">&#9201; 00:00</strong>
+          <strong id="progress-label">0%</strong>
+        </span>
       </div>
       <div class="progress-track">
         <div class="progress-fill" id="progress-fill"></div>
@@ -214,6 +217,7 @@
     <section class="panel queue-panel">
       <div class="panel-heading compact">
         <h2>Activity</h2>
+        <button class="text-button" id="rerun-failed" hidden>Re-run failed</button>
         <button class="text-button" id="download-zip-btn">Download ZIP</button>
         <button class="text-button" id="export-log">Export</button>
       </div>
