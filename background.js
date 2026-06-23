@@ -531,7 +531,7 @@ async function runPrompt(item) {
   const ready = await ensureContentReady(tabId);
   if (!ready.success) return ready;
 
-  const submitResponse = await sendTabMessage(tabId, {
+  const submitMessage = {
     action: "SUBMIT_PROMPT",
     prompt,
     settings: {
@@ -542,7 +542,32 @@ async function runPrompt(item) {
       platform: appState.settings.platform,
       resolution: appState.settings.resolution
     }
-  });
+  };
+  let submitResponse = await sendTabMessage(tabId, submitMessage);
+
+  // Firefly's SPA sometimes wedges and never renders the prompt box, so the
+  // submit returns "Prompt input not found". The periodic refresh may not be due,
+  // so a plain queue retry re-hits the same wedged page (run logs show these
+  // failing in clusters of 3-4). Reload the tab once and resubmit so this attempt
+  // -- and any later retry -- start from a clean page.
+  if (
+    appState.settings.platform === "firefly" &&
+    !submitResponse.success &&
+    RoutePolicy.shouldReloadBeforeRetry(submitResponse.error)
+  ) {
+    addLog("Prompt box missing — reloading Firefly and retrying");
+    if (await refreshFireflyTab(tabId)) {
+      appState.promptsSinceRefresh = 0;
+      await saveAndBroadcast();
+      const renav = await navigateToFireflyGenerate(tabId);
+      if (renav.success) {
+        const reready = await ensureContentReady(tabId);
+        if (reready.success) {
+          submitResponse = await sendTabMessage(tabId, submitMessage);
+        }
+      }
+    }
+  }
 
   if (submitResponse.resolutionDiag) {
     addLog(submitResponse.resolutionDiag);
@@ -1238,6 +1263,21 @@ function addRunSummary() {
   );
   const elapsedMs = appState.startedAt ? Date.now() - appState.startedAt : 0;
   addLog(`Run summary: ${QueueState.formatRunSummary(computeStats(), downloads, elapsedMs)}`);
+  // Reconcile captures so a short ZIP is never silent: name the prompts whose
+  // image did not land so they can be re-run, instead of just undercounting.
+  if (appState.settings && appState.settings.zipDownload) {
+    const gaps = QueueState.captureGaps(appState.queue, true);
+    if (gaps.shortfall > 0) {
+      addLog(`⚠ Captured ${gaps.captured} of ${gaps.expected} images (${gaps.shortfall} missing).`);
+      if (gaps.missing.length) {
+        addLog(
+          "No capture recorded for: "
+          + gaps.missing.map((m) => `#${m.position} ${truncate(m.prompt, 40)}`).join(" | ")
+          + " — re-run these to be safe."
+        );
+      }
+    }
+  }
   // Surface the total run time as its own labelled line and a structured field on
   // the exported state, so it is easy to read off / quote without parsing the
   // summary string.

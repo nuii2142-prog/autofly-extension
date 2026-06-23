@@ -7,7 +7,8 @@ const {
   shouldAssumeSubmittedAfterFailedSubmit,
   shouldGuardFireflyRedirect,
   shouldReturnToGenerateAfterWait,
-  shouldRefreshFireflyPage
+  shouldRefreshFireflyPage,
+  shouldReloadBeforeRetry
 } = require("../src/background/route-policy.js");
 
 test("isFireflyUrl accepts only pages on the firefly.adobe.com host", () => {
@@ -50,6 +51,17 @@ test("shouldRefreshFireflyPage refreshes only Firefly runs at the configured int
     shouldRefreshFireflyPage({ platform: "current-tab", promptsSinceRefresh: 99, refreshEvery: 10 }),
     false
   );
+});
+
+test("shouldReloadBeforeRetry triggers a reload only for page-wedged submit errors", () => {
+  // The cluster failure mode: a wedged SPA never renders the prompt box.
+  assert.equal(shouldReloadBeforeRetry("Prompt input not found"), true);
+  assert.equal(shouldReloadBeforeRetry("Generate button not found"), true);
+  // Ordinary failures use the normal retry path, not a reload.
+  assert.equal(shouldReloadBeforeRetry("Timed out"), false);
+  assert.equal(shouldReloadBeforeRetry("Prompt box did not accept the new prompt"), false);
+  assert.equal(shouldReloadBeforeRetry(""), false);
+  assert.equal(shouldReloadBeforeRetry(undefined), false);
 });
 const { applyPromptResultToItem } = require("../src/background/queue-state.js");
 

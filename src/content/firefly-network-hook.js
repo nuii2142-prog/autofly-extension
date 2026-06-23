@@ -28,6 +28,19 @@
     return items.length ? items : null;
   }
 
+  // Firefly Image 5's 1K/2K picker is cosmetic: the generate request always
+  // carries "resolutionLevel":"1MP" (1K) no matter what the picker shows, so
+  // selecting 2K still yields a 1K image. The real lever is this request field
+  // ("1MP"=1K, "4MP"=2K). Rewriting it to "4MP" makes Image 5 return 2688x1536
+  // (confirmed live on image5). DOM-free + pure so it can be unit tested; the
+  // caller below decides when to apply it.
+  const RESOLUTION_LEVEL = { "1K": "1MP", "2K": "4MP" };
+  function rewriteResolutionLevel(bodyText, wantResolution) {
+    const level = RESOLUTION_LEVEL[wantResolution];
+    if (!level || typeof bodyText !== "string") return bodyText;
+    return bodyText.replace(/"resolutionLevel"\s*:\s*"[^"]*"/, '"resolutionLevel":"' + level + '"');
+  }
+
   const win = typeof window !== "undefined" ? window : null;
 
   if (win && !win.__nuiiFFHookInstalled && typeof win.fetch === "function") {
@@ -47,16 +60,45 @@
     };
 
     const origFetch = win.fetch;
-    // Chain on the original promise and clone the response BEFORE returning it to
-    // the app, so reading our clone never races the app consuming the body.
+    const GEN_URL_V5 = "image-v5.ff.adobe.io/v1/images/generate-async";
+    // The runner bridges the desired resolution here via a documentElement dataset
+    // attribute (this MAIN-world script shares the DOM but not window with
+    // content.js). Only "2K" needs overriding; 1K is Firefly's own default.
+    function force2KWanted() {
+      try {
+        return !!win.document &&
+          win.document.documentElement.getAttribute("data-nuii-resolution") === "2K";
+      } catch (e) { return false; }
+    }
+    // Clone the response BEFORE returning it to the app so reading our copy never
+    // races the app consuming the body.
+    function tapResponse(res) {
+      try {
+        const ct = (res.headers && res.headers.get("content-type")) || "";
+        if (ct.includes("json")) res.clone().json().then(forward).catch(() => {});
+      } catch (e) {}
+      return res;
+    }
     win.fetch = function (...args) {
-      return origFetch.apply(this, args).then((res) => {
-        try {
-          const ct = (res.headers && res.headers.get("content-type")) || "";
-          if (ct.includes("json")) res.clone().json().then(forward).catch(() => {});
-        } catch (e) {}
-        return res;
-      });
+      const url = (args[0] && args[0].url) || args[0];
+      if (typeof url === "string" && url.indexOf(GEN_URL_V5) !== -1 && force2KWanted()) {
+        const first = args[0];
+        if (first && typeof first === "object" && typeof first.clone === "function") {
+          // fetch(Request): read + rewrite the body, then rebuild the Request.
+          return first.clone().text().then((body) => {
+            const next = rewriteResolutionLevel(body, "2K");
+            const req = next !== body ? new Request(first, { body: next }) : first;
+            return origFetch.call(win, req).then(tapResponse);
+          }).catch(() => origFetch.apply(this, args).then(tapResponse));
+        }
+        if (args[1] && typeof args[1].body === "string") {
+          // fetch(url, { body })
+          const next = rewriteResolutionLevel(args[1].body, "2K");
+          if (next !== args[1].body) args[1] = Object.assign({}, args[1], { body: next });
+          return origFetch.apply(this, args).then(tapResponse);
+        }
+      }
+      return origFetch.apply(this, args).then(tapResponse);
     };
 
     const Xhr = win.XMLHttpRequest;
@@ -76,7 +118,7 @@
     }
   }
 
-  const api = { extractOutputs };
+  const api = { extractOutputs, rewriteResolutionLevel };
   if (typeof module !== "undefined" && module.exports) {
     module.exports = api;
   }

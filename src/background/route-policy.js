@@ -72,6 +72,15 @@
       && Number(opts.promptsSinceRefresh) >= Number(opts.refreshEvery);
   }
 
+  // Firefly's SPA occasionally wedges and never renders the prompt box (or its
+  // Generate button), so SUBMIT_PROMPT returns "Prompt input not found". A plain
+  // queue retry re-hits the same wedged page because the periodic refresh may not
+  // be due yet (run logs show these failing in clusters), so the runner reloads
+  // the tab once before retrying when it sees one of these page-wedged errors.
+  function shouldReloadBeforeRetry(error) {
+    return /prompt input not found|generate button not found/i.test(String(error || ""));
+  }
+
   const api = {
     isFireflyUrl,
     isFireflyGenerateUrl,
@@ -81,7 +90,8 @@
     shouldGuardFireflyRedirect,
     shouldReturnToGenerateAfterWait,
     shouldRecoverWaitError,
-    shouldRefreshFireflyPage
+    shouldRefreshFireflyPage,
+    shouldReloadBeforeRetry
   };
 
   root.NuiiBackgroundRoutePolicy = api;

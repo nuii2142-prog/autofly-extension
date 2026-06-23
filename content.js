@@ -94,6 +94,15 @@
 
   async function submitPrompt(prompt, settings = {}) {
     const startedAt = Date.now();
+    // Bridge the run's desired resolution to the MAIN-world network hook
+    // (firefly-network-hook.js), which forces true 2K by rewriting the generate
+    // request. Firefly Image 5's 1K/2K picker is cosmetic -- it does not change
+    // the generated size -- so the hook overrides the request's resolutionLevel
+    // instead. The two content-script worlds share the DOM but not window, so a
+    // documentElement dataset attribute is the bridge.
+    try {
+      document.documentElement.setAttribute("data-nuii-resolution", settings.resolution || "");
+    } catch (e) {}
     await preferGridView();
     const resolution = await applyResolution(settings.resolution);
     // The runner reloads the Firefly tab every FIREFLY_REFRESH_EVERY prompts, and
@@ -1038,6 +1047,13 @@
   const ZIP_DB_VERSION = 1;
   const ZIP_IMAGES_STORE = "images";
   const ZIP_META_STORE = "meta";
+  // How long to wait, after a generation completes, for the result poll's image
+  // capture to arrive. The poll (carrying the presigned URLs) can lag the DOM
+  // completion signal under load late in a long run; 8s was too short and lost
+  // ~2 of 50 images (slow polls attributed to the next prompt or dropped), so
+  // wait longer. The happy path exits on the first capture in well under 1s, so
+  // this only costs time on an actual lag.
+  const ZIP_CAPTURE_WAIT_MS = 20000;
 
   const zipState = {
     active: false,
@@ -1301,6 +1317,23 @@
   }
 
   async function finalizeZip(runId, zipName) {
+    // A result poll can land just after the last prompt is marked done, so its
+    // image capture may still be in flight (or not pushed yet). Flush before
+    // reading IDB so the final batch never misses the ZIP. Keep zipState.active
+    // true through the grace so a straggler poll message is still accepted;
+    // settle once captures stay quiet for a short window, or after a hard cap.
+    const flushUntil = Date.now() + 5000;
+    let quietTicks = 0;
+    while (Date.now() < flushUntil && quietTicks < 2) {
+      if (zipState.pending.length) {
+        quietTicks = 0;
+        await Promise.allSettled(zipState.pending.splice(0));
+      } else {
+        quietTicks += 1;
+        await sleep(400);
+      }
+    }
+    await Promise.allSettled(zipState.pending.splice(0));
     zipState.active = false;
     const targetRun = runId || zipState.runId;
 
@@ -1375,10 +1408,12 @@
       // captured the instant the batch completes — during generation, before this
       // runs. No scraping, no download-button clicking: just wait for this batch's
       // captures to arrive and settle.
-      const deadline = Date.now() + 8000;
+      const deadline = Date.now() + ZIP_CAPTURE_WAIT_MS;
       while (zipState.pending.length === 0 && Date.now() < deadline) {
         await sleep(200);
       }
+      // Brief settle so a co-arriving second image of the same batch enqueues too.
+      if (zipState.pending.length) await sleep(400);
       const results = await Promise.allSettled(zipState.pending);
       zipState.pending = [];
       const captured = results.filter((result) => result.status === "fulfilled" && result.value).length;

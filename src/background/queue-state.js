@@ -116,6 +116,26 @@
     return `${summary.done || 0} done, ${summary.failed || 0} failed, ${images} image${images === 1 ? "" : "s"}, ${minutes}:${seconds}`;
   }
 
+  // After a run, reconcile captured images against completed prompts. With ZIP
+  // capture each done prompt should yield at least one image; a done item with
+  // downloads=0 means the result poll's image never landed in its capture window
+  // (a slow poll late in a laggy run). Returns the totals plus the specific
+  // prompts that came up empty so the summary can name them instead of silently
+  // undercounting. `shortfall` is the accurate net count (expected - captured);
+  // `missing` lists suspect prompts (1-based queue position + text) to re-run.
+  function captureGaps(queue, zipEnabled) {
+    const items = Array.isArray(queue) ? queue : [];
+    const done = items.filter((item) => item && item.status === "done");
+    const captured = done.reduce(
+      (sum, item) => sum + ((item.meta && Number(item.meta.downloads)) || 0),
+      0
+    );
+    const missing = !zipEnabled ? [] : done
+      .filter((item) => ((item.meta && Number(item.meta.downloads)) || 0) === 0)
+      .map((item) => ({ position: items.indexOf(item) + 1, prompt: String(item.prompt || "") }));
+    return { expected: done.length, captured, shortfall: Math.max(0, done.length - captured), missing };
+  }
+
   // A prompt entry is either a bare string or { prompt, sourcePrompt }. Reduce it
   // to the { prompt, sourcePrompt } shape the queue stores.
   function normalizeEntry(entry) {
@@ -216,6 +236,7 @@
     computeStats,
     recoverRunningItemsAfterRestart,
     formatRunSummary,
+    captureGaps,
     buildSegmentedQueue,
     segmentComplete,
     nextFailureStreak,

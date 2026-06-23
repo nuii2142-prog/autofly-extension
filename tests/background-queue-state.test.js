@@ -1,7 +1,37 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { applyPromptResultToItem, canStartNewRun, formatRunSummary } = require("../src/background/queue-state.js");
+const { applyPromptResultToItem, canStartNewRun, formatRunSummary, captureGaps } = require("../src/background/queue-state.js");
+
+test("captureGaps names done prompts whose image was not captured; shortfall is the net", () => {
+  const queue = [
+    { status: "done", prompt: "first prompt", meta: { downloads: 1 } },
+    { status: "done", prompt: "second prompt", meta: { downloads: 0 } },
+    { status: "done", prompt: "third prompt", meta: { downloads: 2 } },
+    { status: "failed", prompt: "failed prompt", meta: { downloads: 0 } }
+  ];
+  const gaps = captureGaps(queue, true);
+  assert.equal(gaps.expected, 3);   // 3 done items
+  assert.equal(gaps.captured, 3);   // 1 + 0 + 2 (a straggler counted on #3)
+  assert.equal(gaps.shortfall, 0);  // net is whole even though #2 reads 0
+  assert.deepEqual(gaps.missing, [{ position: 2, prompt: "second prompt" }]);
+});
+
+test("captureGaps shortfall counts the true net of missing images", () => {
+  const queue = [
+    { status: "done", prompt: "a", meta: { downloads: 1 } },
+    { status: "done", prompt: "b", meta: { downloads: 0 } },
+    { status: "done", prompt: "c", meta: { downloads: 0 } }
+  ];
+  const gaps = captureGaps(queue, true);
+  assert.equal(gaps.captured, 1);
+  assert.equal(gaps.shortfall, 2);
+  assert.equal(gaps.missing.length, 2);
+});
+
+test("captureGaps lists nothing when ZIP capture is off", () => {
+  assert.deepEqual(captureGaps([{ status: "done", prompt: "a", meta: { downloads: 0 } }], false).missing, []);
+});
 
 test("canStartNewRun rejects while a run is active or a previous loop is still unwinding", () => {
   assert.deepEqual(
