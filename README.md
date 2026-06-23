@@ -11,6 +11,16 @@ A Chrome extension that automates **bulk image generation on Adobe Firefly**. Lo
 
 This is an independent, original project. It contains no third-party extension code, Adobe branding, or proprietary APIs. It drives the normal Firefly web UI using your own signed-in account.
 
+## How it works
+
+```mermaid
+flowchart LR
+    A["Prompts<br/>paste · .txt · .csv"] --> B["Queue<br/>delay · retry · dedupe"]
+    B --> C["Adobe Firefly<br/>Image 5 · 2K"]
+    C --> D["Capture results<br/>full-resolution"]
+    D --> E["Single ZIP<br/>per file"]
+```
+
 ---
 
 ## ⚠️ Disclaimer — read before using
