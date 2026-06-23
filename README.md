@@ -1,5 +1,12 @@
 # Nuii Auto Bulk
 
+> Bulk-automate Adobe Firefly image generation — queue prompts, run large batches unattended, and collect full-resolution results in a single ZIP.
+
+![Manifest V3](https://img.shields.io/badge/Manifest-V3-4285F4?logo=googlechrome&logoColor=white)
+![Chrome Extension](https://img.shields.io/badge/Chrome-Extension-FF7139?logo=googlechrome&logoColor=white)
+![License: MIT](https://img.shields.io/badge/License-MIT-22c55e)
+![No tracking](https://img.shields.io/badge/Privacy-No%20tracking-22c55e)
+
 A Chrome extension that automates **bulk image generation on Adobe Firefly**. Load a list of prompts, press Start, and the extension submits them one by one, captures the full-resolution results, and packs them into a ZIP — so you can leave a long batch running unattended.
 
 This is an independent, original project. It contains no third-party extension code, Adobe branding, or proprietary APIs. It drives the normal Firefly web UI using your own signed-in account.
@@ -89,4 +96,4 @@ If this tool saves you time, you can support its development:
 
 ## License
 
-No license is set yet. If you plan to open-source it, add a `LICENSE` file (e.g. MIT). Until then, all rights reserved by the author.
+[MIT](LICENSE) © Chanuwat Srithong
